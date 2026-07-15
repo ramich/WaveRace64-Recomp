@@ -268,6 +268,16 @@ static void poke_apply(uint8_t* rdram) {
             // FOV/aspect value: widen by the configured factor.
             if (rd32g(rdram, c.addr) == c.w[0]) {
                 wr32g(rdram, c.addr, f_to_bits(bits_to_f(c.w[0]) * s_fov_scale));
+                // Log each live write once — the set of addresses the game
+                // actively re-reads is the candidate shortlist.
+                static std::vector<uint32_t> logged_addrs;
+                bool seen = false;
+                for (uint32_t a : logged_addrs) { if (a == c.addr) { seen = true; break; } }
+                if (!seen && logged_addrs.size() < 64) {
+                    logged_addrs.push_back(c.addr);
+                    fprintf(stderr, "[FOV] live poke at 0x%08X (%.1f -> %.1f)\n",
+                        c.addr, bits_to_f(c.w[0]), bits_to_f(c.w[0]) * s_fov_scale);
+                }
             }
         }
     }
@@ -620,11 +630,28 @@ public:
                                 }
                             }
                         }
+                        // WR64_POKE_FOV_ONLY=addr[,addr...]: restrict pokes to
+                        // specific addresses (candidate isolation runs).
+                        static const char* only_env = std::getenv("WR64_POKE_FOV_ONLY");
+                        if (only_env && only_env[0] != '\0') {
+                            std::vector<PokeCandidate> filtered;
+                            const char* p = only_env;
+                            while (*p) {
+                                uint32_t a = (uint32_t)strtoul(p, nullptr, 16);
+                                for (const auto& e : s_poke_list) {
+                                    if (e.addr == a) filtered.push_back(e);
+                                }
+                                const char* comma = strchr(p, ',');
+                                if (!comma) break;
+                                p = comma + 1;
+                            }
+                            s_poke_list = filtered;
+                        }
                         s_poke_lo = 0;
                         s_poke_hi = s_poke_list.size();
                         if (added > 0) {
-                            fprintf(stderr, "[FOV] +%d new candidates (total %zu), widening 1.3x\n",
-                                added, s_poke_list.size());
+                            fprintf(stderr, "[FOV] +%d new candidates (total %zu after filter), factor %.2fx\n",
+                                added, s_poke_list.size(), s_fov_scale);
                         }
                     }
                 }
