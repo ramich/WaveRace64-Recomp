@@ -134,6 +134,9 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 // SDL2 window / gfx callbacks
 // ---------------------------------------------------------------------------
 #include <SDL2/SDL.h>
+#ifdef _WIN32
+#include <SDL2/SDL_syswm.h>
+#endif
 
 static SDL_Window* sdl_window = nullptr;
 
@@ -146,16 +149,30 @@ static void* create_gfx() {
 }
 
 static ultramodern::renderer::WindowHandle create_window(void* /*gfx_data*/) {
+#ifdef _WIN32
+    // On Windows RT64 attaches via the native HWND (D3D12/Vulkan chosen at
+    // runtime), so SDL_WINDOW_VULKAN must not be forced here.
+    constexpr Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+#else
+    constexpr Uint32 window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
     sdl_window = SDL_CreateWindow(
         "Wave Race 64",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         1280, 960,
-        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
+        window_flags
     );
     if (!sdl_window) {
         fprintf(stderr, "[WR64] SDL_CreateWindow failed: %s\n", SDL_GetError());
     }
+#ifdef _WIN32
+    SDL_SysWMinfo wmInfo;
+    SDL_VERSION(&wmInfo.version);
+    SDL_GetWindowWMInfo(sdl_window, &wmInfo);
+    return ultramodern::renderer::WindowHandle{ wmInfo.info.win.window, GetCurrentThreadId() };
+#else
     return sdl_window;
+#endif
 }
 
 static void update_gfx(void* /*gfx_data*/) {

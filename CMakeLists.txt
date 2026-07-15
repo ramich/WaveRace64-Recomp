@@ -13,10 +13,17 @@ option(BUILD_RT64 "Build RT64 rendering backend" ON)
 message(STATUS "WaveRace64-Recomp v${PROJECT_VERSION}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
+# Opt out of constexpr mutex constructor on windows to prevent vcredist issues
+if (WIN32)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+endif()
+
 # =============================================================================
 # Find dependencies
 # =============================================================================
-find_package(SDL2 REQUIRED)
+if (NOT WIN32)
+    find_package(SDL2 REQUIRED)
+endif()
 
 # =============================================================================
 # RT64 — static rendering backend
@@ -72,6 +79,7 @@ set(WR64_SOURCES
     src/audio.cpp
     src/input.cpp
     src/os_stubs.cpp
+    rsp/aspMain.cpp
 )
 
 add_executable(WaveRace64Recomp ${WR64_SOURCES})
@@ -102,18 +110,71 @@ endif()
 # Link libraries
 # Use --start-group/--end-group to handle circular dependencies between
 # recomp_funcs (which references librecomp symbols) and librecomp (which
-# needs function tables from recomp_funcs).
-target_link_libraries(WaveRace64Recomp PRIVATE
-    -Wl,--start-group
-    recomp_funcs
-    librecomp
-    ultramodern
-    -Wl,--end-group
-    SDL2::SDL2
-)
+# needs function tables from recomp_funcs). MSVC-style linkers resolve
+# static-library cycles iteratively, so no grouping is needed there.
+if (MSVC)
+    target_link_libraries(WaveRace64Recomp PRIVATE
+        recomp_funcs
+        librecomp
+        ultramodern
+    )
+    # Allow multiple definitions (e.g. guMtxF2L appears in multiple overlay sections)
+    target_link_options(WaveRace64Recomp PRIVATE /FORCE:MULTIPLE)
+else()
+    target_link_libraries(WaveRace64Recomp PRIVATE
+        -Wl,--start-group
+        recomp_funcs
+        librecomp
+        ultramodern
+        -Wl,--end-group
+        SDL2::SDL2
+    )
+    # Allow multiple definitions (e.g. guMtxF2L appears in multiple overlay sections)
+    target_link_options(WaveRace64Recomp PRIVATE -Wl,--allow-multiple-definition)
+endif()
 
-# Allow multiple definitions (e.g. guMtxF2L appears in multiple overlay sections)
-target_link_options(WaveRace64Recomp PRIVATE -Wl,--allow-multiple-definition)
+# =============================================================================
+# Windows: fetch SDL2 (VC devel package) and copy runtime DLLs
+# =============================================================================
+if (WIN32)
+    include(FetchContent)
+
+    if (DEFINED ENV{SDL2_VERSION})
+        set(SDL2_VERSION $ENV{SDL2_VERSION})
+    else()
+        set(SDL2_VERSION "2.30.3")
+    endif()
+
+    FetchContent_Declare(
+        sdl2
+        URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip
+    )
+    FetchContent_MakeAvailable(sdl2)
+
+    # The SDL2 VC devel package puts headers in include/ directly, but the
+    # sources include <SDL2/SDL.h> (Linux layout). Mirror them into an SDL2/
+    # subdirectory so both layouts resolve.
+    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sdl2-compat-include/SDL2)
+    file(GLOB SDL2_COMPAT_HEADERS ${sdl2_SOURCE_DIR}/include/*.h)
+    file(COPY ${SDL2_COMPAT_HEADERS} DESTINATION ${CMAKE_BINARY_DIR}/sdl2-compat-include/SDL2)
+    target_include_directories(WaveRace64Recomp PRIVATE
+        ${sdl2_SOURCE_DIR}/include
+        ${CMAKE_BINARY_DIR}/sdl2-compat-include
+    )
+
+    # windows.h min/max macros break hlslpp (via rt64 headers)
+    target_compile_definitions(WaveRace64Recomp PRIVATE NOMINMAX)
+    target_link_directories(WaveRace64Recomp PRIVATE ${sdl2_SOURCE_DIR}/lib/x64)
+    target_link_libraries(WaveRace64Recomp PRIVATE SDL2 Winmm.lib)
+
+    # Copy SDL2 and dxc DLLs next to the executable
+    add_custom_command(TARGET WaveRace64Recomp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${sdl2_SOURCE_DIR}/lib/x64/SDL2.dll"
+            "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxil.dll"
+            "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64/src/contrib/dxc/bin/x64/dxcompiler.dll"
+            $<TARGET_FILE_DIR:WaveRace64Recomp>)
+endif()
 
 if (BUILD_RT64)
     target_link_libraries(WaveRace64Recomp PRIVATE rt64)
@@ -127,12 +188,21 @@ if (UNIX AND NOT APPLE)
     )
 endif()
 
+# The recompiled RSP vector code (rsp_vu_impl.hpp) requires SSE4.1 on x86-64;
+# -march=nehalem matches what Pilotwings64Recomp uses (SSE4.1-era baseline).
+if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+    target_compile_options(WaveRace64Recomp PRIVATE -march=nehalem)
+endif()
+
 # Compiler warnings for game code
-target_compile_options(WaveRace64Recomp PRIVATE
-    -Wall
-    -Wextra
-    -Wno-unused-parameter
-)
+# (clang-cl/MSVC interpret -Wall as /Wall, i.e. -Weverything — far too noisy)
+if (NOT MSVC)
+    target_compile_options(WaveRace64Recomp PRIVATE
+        -Wall
+        -Wextra
+        -Wno-unused-parameter
+    )
+endif()
 
 # =============================================================================
 # Installation

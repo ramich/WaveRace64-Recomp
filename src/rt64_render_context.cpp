@@ -7,6 +7,14 @@
  * screen updates, and shutdown through a uniform interface.
  */
 
+#ifdef _WIN32
+// RT64's D3D12 headers (dxcapi.h etc.) need the COM base declarations
+// (IUnknown, IStream) before they are included.
+#include <windows.h>
+#include <unknwn.h>
+#include <objidl.h>
+#endif
+
 #include "rt64_render_context.h"
 
 #include <cstdio>
