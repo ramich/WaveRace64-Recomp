@@ -51,7 +51,27 @@ NTSC-U widescreen code patches their high halfwords to 0x3FE3 (1.7777 = 16:9):
 - True logic-rate change would need the physics timestep and frame counters
   found and patched — major RE effort.
 
-## HUD
+## View culling (the real border/widescreen blocker)
+
+User-verified behavior with the scissor rewrite active: the revealed margins show
+ONLY the flat background ocean — islands, racers, and the detailed wave mesh are
+absent, and there is a visible color seam at the original view-rect boundary. So the
+game culls objects AND sizes its detailed water against the original view rect;
+revealing more canvas without widening those bounds shows a half-rendered world.
+Border removal is therefore default-off (WR64_BORDERS=0 to experiment) until the
+culling bounds are widened. The same fix unlocks clean widescreen (edge pop-in).
+
+Dead ends eliminated (static analysis):
+- The view-bounds-shaped globals found by RDRAM scan (0x8037117C {8,224,...},
+  0x80371AD4 {8,312,...}) have ZERO absolute-address references in code — the
+  0x8037 page is heap; structs are reached via pointers only.
+- No float screen-bound constants (312.0f/310.0f/218.0f/302.0f/198.0f) appear as
+  lui immediates anywhere — culling is integer-based or computed.
+
+Next approach (dynamic): a scan-and-poke bisection harness — locate {8,312}/{20,218}
+value patterns in RDRAM at runtime, widen them in batches from the native side, and
+diff framebuffer dumps to identify which addresses actually control culling. The
+winning addresses then reveal their owning struct/function for a proper patch.
 
 - HUD elements stretch in widescreen (user-observed). The HUD is drawn in 2D ortho
   coordinates; keeping it 4:3 needs either RT64 extended-GBI tagging or game

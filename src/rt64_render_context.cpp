@@ -250,17 +250,18 @@ public:
         uint32_t ucode_data_phys = static_cast<uint32_t>(task->t.ucode_data) & 0x3FFFFFFu;
         uint32_t dl_start_phys   = static_cast<uint32_t>(task->t.data_ptr)   & 0x3FFFFFFu;
 
-        // Border removal: the game scissors rendering to ~(8,20)-(310,218),
-        // drawing black CRT-overscan borders inside its own framebuffer. The
-        // scissor commands are built by 20+ functions across the scene
-        // overlays, so instead of patching each site, rewrite the
-        // G_SETSCISSOR commands in the display list before RT64 processes it.
-        // Only near-fullscreen scissors are expanded — split-screen and other
-        // intentional sub-rect scissors (e.g. y0=122) are left alone.
-        // WR64_BORDERS=1 keeps the original borders.
+        // Border removal (EXPERIMENTAL, opt-in via WR64_BORDERS=0): the game
+        // scissors rendering to ~(8,20)-(310,218), drawing black CRT-overscan
+        // borders inside its own framebuffer. Rewriting the G_SETSCISSOR
+        // commands here reveals the full render, BUT the game also culls
+        // objects and the detailed wave mesh against the original view rect,
+        // so the revealed margins currently show only the flat ocean with a
+        // visible color seam (user-verified). Proper removal needs the game's
+        // view-bounds variables widened via game patches — until then the
+        // original borders remain the default.
         {
             static const char* borders_env = std::getenv("WR64_BORDERS");
-            if (!(borders_env && borders_env[0] == '1')) {
+            if (borders_env && borders_env[0] == '0') {
                 uint8_t* rdram = app_->core.RDRAM;
                 uint32_t addr = dl_start_phys;
                 for (int i = 0; i < 0x4000; i++, addr += 8) {

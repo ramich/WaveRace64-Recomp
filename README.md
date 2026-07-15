@@ -52,18 +52,19 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 - **Widescreen rough edges** (needs game patches): the HUD stretches with the window
   instead of staying at its original aspect, and objects can pop in at the screen
   edges because the game culls against the 4:3 frustum
-- ~~**Black borders** around the game image~~ **Fixed:** the game draws CRT-overscan
-  borders inside its own framebuffer via G_SETSCISSOR commands built by 20+ functions
-  across the scene overlays; the port rewrites near-fullscreen scissors in the display
-  list at submission time (split-screen scissors are untouched). `WR64_BORDERS=1`
-  restores the original borders
+- **Black borders** around the game image: drawn by the game inside its framebuffer
+  (CRT overscan compensation). Scissor-rewrite removal exists (`WR64_BORDERS=0`,
+  experimental) but the game also culls objects/waves against the original view rect,
+  leaving the revealed margins half-rendered with a color seam — full removal needs
+  the culling bounds widened (game patch, in progress; shares its fix with widescreen
+  edge pop-in)
 
 ### Environment variables & keys
 
 | Setting | Effect |
 |---------|--------|
 | `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
-| `WR64_BORDERS=1` | Keep the game's original black overscan borders (default: removed) |
+| `WR64_BORDERS=0` | Experimental border removal via scissor rewrite. Currently reveals margins the game doesn't fully render (objects/waves are culled to the original view rect, with a visible color seam) — default is original borders until the culling patch lands |
 | `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
 | `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: clouds stutter (billboards regenerate per game frame and can't be matched for interpolation — see `docs/RE-NOTES.md`) |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F2 ray tracing, F3 raw-RDRAM view, F4 texture replacements. Debug keys are inert without this. |
