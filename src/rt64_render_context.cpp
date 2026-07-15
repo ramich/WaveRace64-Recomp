@@ -470,6 +470,40 @@ public:
                     if (op == 0xB8) { // G_ENDDL (F3DEX)
                         break;
                     }
+                    if (op == 0x01) { // G_MTX (F3DEX): params in w0 bits 16-23
+                        uint8_t params = (w0 >> 16) & 0xFF;
+                        // G_MTX_PROJECTION=0x01 | G_MTX_LOAD=0x02
+                        if ((params & 0x03) == 0x03) {
+                            uint32_t w1 = *(uint32_t*)(rdram + addr + 4);
+                            uint32_t mtx = w1 & 0x00FFFFFFu;
+                            // N64 Mtx: 16 s16 integer parts then 16 u16 fractions.
+                            auto mtx16 = [&](int idx) -> int16_t {
+                                return (int16_t)rd16g(rdram, 0x80000000u + mtx + idx * 2);
+                            };
+                            bool perspective = (mtx16(15) == 0); // m[3][3]
+                            static const char* proj_env = std::getenv("WR64_POKE_PROJ");
+                            static int proj_seen = 0;
+                            proj_seen++;
+                            if (perspective && (proj_seen % 200) == 0) {
+                                fprintf(stderr,
+                                    "[PROJ] perspective mtx at 0x%08X: m00=%d.%04X m11=%d.%04X m23=%d m33=%d\n",
+                                    0x80000000u + mtx,
+                                    mtx16(0), rd16g(rdram, 0x80000000u + mtx + 32 + 0),
+                                    mtx16(5), rd16g(rdram, 0x80000000u + mtx + 32 + 10),
+                                    mtx16(11), mtx16(15));
+                            }
+                            if (perspective && proj_env && proj_env[0] == '1') {
+                                // Scale m00/m11 by 1/1.3 (wider FOV) in 16.16.
+                                for (int e : { 0, 5 }) {
+                                    int32_t v = ((int32_t)mtx16(e) << 16) |
+                                        rd16g(rdram, 0x80000000u + mtx + 32 + e * 2);
+                                    v = (int32_t)(v / 1.3f);
+                                    wr16g(rdram, 0x80000000u + mtx + e * 2, (uint16_t)((v >> 16) & 0xFFFF));
+                                    wr16g(rdram, 0x80000000u + mtx + 32 + e * 2, (uint16_t)(v & 0xFFFF));
+                                }
+                            }
+                        }
+                    }
                     if (op == 0xED) { // G_SETSCISSOR, coords are 10.2 fixed
                         uint32_t w1 = *(uint32_t*)(rdram + addr + 4);
                         uint32_t x0 = (w0 >> 12) & 0xFFF, y0 = w0 & 0xFFF;
