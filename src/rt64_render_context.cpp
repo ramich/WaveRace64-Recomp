@@ -83,6 +83,9 @@ struct PokeCandidate {
 static std::vector<PokeCandidate> s_poke_list;
 static bool s_poke_loaded = false;
 static size_t s_poke_lo = 0, s_poke_hi = 0;
+// FOV widening factor for kind-2 pokes (WR64_POKE_FOV carries the factor;
+// "1" or unparsable = default 1.3).
+static float s_fov_scale = 1.3f;
 
 static uint16_t rd16g(uint8_t* rdram, uint32_t g) {
     return *(uint16_t*)(rdram + ((g ^ 2) - 0x80000000u));
@@ -262,9 +265,9 @@ static void poke_apply(uint8_t* rdram) {
                 }
             }
         } else {
-            // Aspect constant: widen 1.3x (visible zoom-out / wider view).
+            // FOV/aspect value: widen by the configured factor.
             if (rd32g(rdram, c.addr) == c.w[0]) {
-                wr32g(rdram, c.addr, f_to_bits(bits_to_f(c.w[0]) * 1.3f));
+                wr32g(rdram, c.addr, f_to_bits(bits_to_f(c.w[0]) * s_fov_scale));
             }
         }
     }
@@ -578,7 +581,18 @@ public:
                 // by RT64 projection telemetry) shortly after boot and widens
                 // every hit 1.3x continuously.
                 static const char* fov_env = std::getenv("WR64_POKE_FOV");
-                if (fov_env && fov_env[0] == '1') {
+                if (fov_env && fov_env[0] != '\0' && fov_env[0] != '0') {
+                    // The env value doubles as the widening factor, e.g.
+                    // WR64_POKE_FOV=2.0 for a dramatic zoom-out. "1" = 1.3.
+                    static bool scale_parsed = false;
+                    if (!scale_parsed) {
+                        scale_parsed = true;
+                        float v = (float)atof(fov_env);
+                        if (v > 1.01f && v < 4.0f) {
+                            s_fov_scale = v;
+                        }
+                        fprintf(stderr, "[FOV] widening factor: %.2fx\n", s_fov_scale);
+                    }
                     uint8_t* rdram = app_->core.RDRAM;
                     // Rescan every ~10s: camera structs are created per scene
                     // (demo/race cameras don't exist at boot), so a single
