@@ -55,10 +55,10 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 - **Black borders** around the game image: drawn by the game inside its framebuffer
   (CRT overscan compensation). Scissor-rewrite removal exists (`WR64_BORDERS=0`,
   experimental) but the revealed margins are half-rendered. Root cause now mostly
-  cracked (see `docs/RE-NOTES.md`): the game renders guPerspective(45°, 4:3) and
-  **object culling follows the camera FOV** (verified by widening it — objects render
-  in the margins); the detailed wave-mesh region is sized independently and is the
-  last remaining blocker. Shares its fix with widescreen edge pop-in
+  cracked (see `docs/RE-NOTES.md`): the game renders guPerspective(45°, 4:3); the
+  camera FOV is locatable and widenable at runtime (verified). Whether object culling
+  follows the FOV is still unconfirmed, and the detailed wave-mesh region is sized
+  independently. Shares its fix with widescreen edge pop-in
 
 ### Environment variables & keys
 

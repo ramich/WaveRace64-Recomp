@@ -86,9 +86,15 @@ loaded via segment 3 (per-frame DL buffer at phys ~0x12D8F0). A second ~75° cam
 alternates during demos. Key findings from FOV poking (`WR64_POKE_FOV=1`, scans
 for 45.0f/75.0f floats with periodic rescan since camera structs spawn per scene):
 
-- **Widening the camera fovy widens the view AND object culling follows** —
-  poked framebuffers show racers/objects rendered across the full frame including
-  the former dead margins. Object culling reads the same camera FOV. ✔
+- **Widening the camera fovy widens the view** (user-confirmed). Whether object
+  culling follows is **UNCONFIRMED**: one captured frame shows racers/a buoy in the
+  former margin strips, but a wider FOV also spreads in-frustum objects toward the
+  edges, so a single frame can't distinguish "culling widened" from "same objects,
+  wider lens". The user could not confirm improvement in motion. **Decisive test:**
+  play with an upright factor (e.g. 1.3) and watch the outer ~10% strips: if
+  objects/racers pop in and out at an invisible boundary inside the visible area,
+  culling is separate (old frustum); if they're smoothly present to the very edge,
+  culling follows the FOV. ⚠
 - **The detailed wave-mesh region does NOT follow** — its coverage is still sized
   to the inner rect (visible seam). The water grid has separate bounds. ✘
 - fovy is written by inline 45.0f constants (`lui reg, 0x4234`) at:
