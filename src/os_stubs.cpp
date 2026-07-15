@@ -18,19 +18,8 @@ struct recomp_context;
 // RSP audio microcode stub
 // ---------------------------------------------------------------------------
 
-enum class RspExitReason {
-    Invalid,
-    Broke,
-    Yielded,
-};
-
-extern "C" RspExitReason n64_aspMain(uint8_t* rdram, uint32_t ucode_addr) {
-    // TODO: Implement HLE audio RSP microcode processing.
-    // For now, return Broke to signal task completion.
-    (void)rdram;
-    (void)ucode_addr;
-    return RspExitReason::Broke;
-}
+// (The former n64_aspMain stub was replaced by the real recompiled audio
+// microcode in rsp/aspMain.cpp — see rsp_microcode.cpp.)
 
 // ---------------------------------------------------------------------------
 // Controller Pak / PFS stubs  (recomp calling convention)

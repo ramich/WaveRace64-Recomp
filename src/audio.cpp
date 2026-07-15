@@ -23,6 +23,13 @@ namespace wr64 {
 
 static SDL_AudioDeviceID audio_device = 0;
 static uint32_t current_frequency = 32000;
+// Rate the SDL device is actually open at. Tracked separately from
+// current_frequency: comparing against current_frequency in
+// ensure_audio_device() after set_frequency() already updated it meant the
+// device was never reopened on a rate change — audio then played at the
+// startup dummy rate (48000) regardless of what the game requested,
+// causing fast/high-pitched output and queue-underrun crackle.
+static uint32_t device_frequency = 0;
 static std::atomic<size_t> queued_samples{0};
 
 // ---------------------------------------------------------------------------
@@ -30,7 +37,7 @@ static std::atomic<size_t> queued_samples{0};
 // ---------------------------------------------------------------------------
 
 static void ensure_audio_device(uint32_t freq) {
-    if (audio_device != 0 && current_frequency == freq) {
+    if (audio_device != 0 && device_frequency == freq) {
         return; // Already open at the correct frequency.
     }
 
@@ -54,7 +61,7 @@ static void ensure_audio_device(uint32_t freq) {
         return;
     }
 
-    current_frequency = freq;
+    device_frequency = freq;
     queued_samples.store(0);
 
     // Unpause the device to start playback.
@@ -90,11 +97,25 @@ size_t audio_get_frames_remaining() {
         return 0;
     }
 
-    // SDL_GetQueuedAudioSize returns bytes.
-    uint32_t queued_bytes = SDL_GetQueuedAudioSize(audio_device);
-    // Convert to sample count (stereo int16_t = 4 bytes per frame,
-    // but the callback interface expects individual sample count).
-    return static_cast<size_t>(queued_bytes / sizeof(int16_t));
+    // SDL_GetQueuedAudioSize returns bytes. The runtime expects FRAMES
+    // (ultramodern multiplies by 2 channels * sizeof(int16_t)); reporting
+    // samples here doubles the apparent buffer level, causing underruns and
+    // audible static.
+    constexpr uint32_t bytes_per_frame = 2 * sizeof(int16_t); // stereo s16
+    uint64_t buffered_frames = SDL_GetQueuedAudioSize(audio_device) / bytes_per_frame;
+
+    // Report one VI-refresh of frames fewer than actually buffered so the game
+    // generates audio slightly ahead of playback. Same technique as
+    // Pilotwings64Recomp; prevents popping when the audio thread lags.
+    uint32_t frames_per_vi = current_frequency / 60;
+    if (buffered_frames > frames_per_vi) {
+        buffered_frames -= frames_per_vi;
+    }
+    else {
+        buffered_frames = 0;
+    }
+
+    return static_cast<size_t>(buffered_frames);
 }
 
 void audio_set_frequency(uint32_t freq) {

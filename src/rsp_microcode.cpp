@@ -19,12 +19,9 @@
 #include <cstdio>
 #include "ultramodern/ultra64.h"
 
-// RSP microcode function declarations.
-// These are provided by the recompiled RSP microcode or by librecomp built-ins.
-// Forward-declare the ones we expect to use.
-
-// N64 audio microcode — provided by librecomp as a built-in.
-extern "C" RspExitReason n64_aspMain(uint8_t* rdram, uint32_t ucode_addr);
+// N64 audio microcode, statically recompiled from the ROM by RSPRecomp
+// (recomp/aspMain.us.rev1.toml -> rsp/aspMain.cpp).
+RspExitReason aspMain(uint8_t* rdram, uint32_t ucode_addr);
 
 namespace wr64 {
 
@@ -37,9 +34,21 @@ RspUcodeFunc* get_rsp_microcode(const OSTask* task) {
             // (it will be picked up by the renderer thread via send_dl instead).
             return nullptr;
 
-        case M_AUDTASK:
-            // Audio microcode — the standard N64 audio task processor.
-            return n64_aspMain;
+        case M_AUDTASK: {
+            // Log the task layout once so the ucode's ROM location can be found
+            // (needed to set up RSPRecomp for real audio processing).
+            static bool logged = false;
+            if (!logged) {
+                logged = true;
+                fprintf(stderr,
+                    "[WR64-RSP] AUDTASK: ucode=0x%08X ucode_size=0x%X ucode_data=0x%08X ucode_data_size=0x%X data=0x%08X data_size=0x%X\n",
+                    (uint32_t)task->t.ucode, (uint32_t)task->t.ucode_size,
+                    (uint32_t)task->t.ucode_data, (uint32_t)task->t.ucode_data_size,
+                    (uint32_t)task->t.data_ptr, (uint32_t)task->t.data_size);
+            }
+            // Audio microcode — statically recompiled from this ROM.
+            return aspMain;
+        }
 
         default:
             fprintf(stderr, "[WR64-RSP] Unknown RSP task type: %d (ucode_boot=0x%08X)\n",

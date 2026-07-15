@@ -1,0 +1,22 @@
+# RSPRecomp config for Wave Race 64 (US Rev 1) audio microcode.
+# Location discovered at runtime from the game's M_AUDTASK OSTask:
+#   ucode      RDRAM 0x800D37B0, size 0x800  -> ROM 0x8DFB0 (.main is ROM 0x1000 @ VRAM 0x80046800)
+#   ucode_data RDRAM 0x800EEB10, size 0x2C0  -> ROM 0xA9310
+text_offset = 0x8DFB0
+# The OSTask reports ucode_size=0x800, but rspboot loads more into IMEM —
+# runtime jumps to 0x1E24 proved the code extends past 0x800. 0xF80 overshoots
+# into non-code padding (invalid instructions); 0xE20 matches the actual code
+# extent (same as Pilotwings' aspMain build).
+text_size = 0xE20
+text_address = 0x04001080
+rom_file_path = "../baserom.us.rev1.z64"
+output_file_path = "../rsp/aspMain.cpp"
+output_function_name = "aspMain"
+# Audio command handler dispatch targets: runtime-discovered (0x12D0, 0x11DC,
+# 0x12EC, 0x1E24) plus Pilotwings64Recomp's full list — same microcode family
+# and dispatch layout. Note: the "Unhandled jump target" diagnostic goes to
+# STDOUT, not stderr — check both when hunting new targets.
+extra_indirect_branch_targets = [
+    0x1118, 0x1470, 0x11DC, 0x1B38, 0x1214, 0x187C, 0x1254, 0x12D0,
+    0x12EC, 0x1328, 0x140C, 0x1294, 0x1E24, 0x138C, 0x170C, 0x144C,
+]
