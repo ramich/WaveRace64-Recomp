@@ -544,9 +544,6 @@ public:
             // offline analysis with scripts/measure_borders.py.
             static uint32_t update_count = 0;
             ++update_count;
-            if ((update_count % 300) == 0) {
-                fprintf(stderr, "[WR64] update_screen count=%u\n", update_count);
-            }
 
             // Culling-bounds bisection harness (see scripts/bisect_culling.py).
             {
