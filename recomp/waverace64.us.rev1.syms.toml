@@ -1837,7 +1837,12 @@ size = 0x5C
 [[section.functions]]
 name = "func_8009A460"
 vram = 0x8009A460
-size = 0xF4
+size = 0x7C
+
+[[section.functions]]
+name = "func_8009A4DC"
+vram = 0x8009A4DC
+size = 0x78
 
 [[section.functions]]
 name = "func_8009A554"
