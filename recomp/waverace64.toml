@@ -44,3 +44,33 @@ ignored = [
 # in the display list (src/rt64_render_context.cpp, send_dl) — the border
 # scissor is built by 20+ functions across the scene overlays, so per-site
 # instruction patches don't scale. WR64_BORDERS=1 keeps the original borders.
+
+# --- EXPERIMENT (culling classification): the five camera-mode handlers all
+# load an inline 45.0f (lui $at, 0x4234) at +0x2C. Patch to 66.5f (0x4285) to
+# classify each site: projection mover / culling mover / camera angle.
+# REVERT before shipping — diagnostic values only.
+
+[[patches.instruction]]
+func = "func_8009B910"
+vram = 0x8009B93C
+value = 0x3C014285 # lui $at, 0x4285 (66.5f)
+
+[[patches.instruction]]
+func = "func_8009BA14"
+vram = 0x8009BA40
+value = 0x3C014285
+
+[[patches.instruction]]
+func = "func_8009BAE0"
+vram = 0x8009BB0C
+value = 0x3C014285
+
+[[patches.instruction]]
+func = "func_8009BB98"
+vram = 0x8009BBC4
+value = 0x3C014285
+
+[[patches.instruction]]
+func = "func_8009BCA4"
+vram = 0x8009BCD0
+value = 0x3C014285
