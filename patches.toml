@@ -1,0 +1,25 @@
+# Config for recompiling the game patches (patches/*.c -> RecompiledPatches/).
+# Modeled on Pilotwings64Recomp's patches.toml.
+
+[input]
+# Paths are relative to the location of this config file.
+elf_path = "patches/patches.elf"
+output_func_path = "RecompiledPatches"
+single_file_output = true
+
+# Allow absolute symbols to be used as jump targets.
+use_absolute_symbols = true
+
+# Point the recompiler at the symbol file so it can resolve relocations.
+func_reference_syms_file = "recomp/waverace64.us.rev1.syms.toml"
+
+# Write the output binary directly so the recompiler can patch MIPS32 relocs.
+output_binary_path = "patches/patches.bin"
+
+# Clang produces many unpaired LO16 values; don't warn about them.
+unpaired_lo16_warnings = false
+# Allow exporting functions and events for mods to use.
+allow_exports = true
+
+# Validate that patched symbols exist and non-patch functions aren't game symbols.
+strict_patch_mode = true

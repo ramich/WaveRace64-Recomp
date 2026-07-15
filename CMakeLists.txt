@@ -72,6 +72,52 @@ target_compile_options(recomp_funcs PRIVATE
 # =============================================================================
 # Game executable
 # =============================================================================
+# =============================================================================
+# Game patches: patches/*.c -> MIPS elf -> recompiled native code
+# =============================================================================
+if(NOT DEFINED PATCHES_C_COMPILER)
+    set(PATCHES_C_COMPILER clang)
+endif()
+if(NOT DEFINED PATCHES_LD)
+    set(PATCHES_LD ld.lld)
+endif()
+
+# Build the patches elf with the MIPS cross toolchain.
+add_custom_target(PatchesBin
+    COMMAND ${CMAKE_COMMAND} -E env CC=${PATCHES_C_COMPILER} LD=${PATCHES_LD} make
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/patches
+    BYPRODUCTS ${CMAKE_CURRENT_SOURCE_DIR}/patches/patches.elf
+)
+
+# Recompile the patches elf into native code + the patch data binary.
+add_custom_command(OUTPUT
+                       ${CMAKE_CURRENT_SOURCE_DIR}/patches/patches.bin
+                       ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/patches.c
+                       ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/recomp_overlays.inl
+                       ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/funcs.h
+                   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/lib/N64Recomp/build/N64Recomp patches.toml
+                   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/patches/patches.elf
+)
+
+# Embed the patch data binary as a C array.
+add_custom_command(OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/patches_bin.c
+    COMMAND file_to_c ${CMAKE_CURRENT_SOURCE_DIR}/patches/patches.bin mm_patches_bin ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/patches_bin.c ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/patches_bin.h
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/patches/patches.bin
+)
+
+add_library(PatchesLib STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/patches.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/RecompiledPatches/patches_bin.c
+)
+add_dependencies(PatchesLib PatchesBin)
+
+target_include_directories(PatchesLib PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/N64Recomp/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/N64ModernRuntime/librecomp/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/N64ModernRuntime/ultramodern/include"
+)
+
 set(WR64_SOURCES
     src/main.cpp
     src/rt64_render_context.cpp
@@ -79,6 +125,7 @@ set(WR64_SOURCES
     src/audio.cpp
     src/input.cpp
     src/os_stubs.cpp
+    src/register_patches.cpp
     rsp/aspMain.cpp
 )
 
@@ -115,6 +162,7 @@ endif()
 if (MSVC)
     target_link_libraries(WaveRace64Recomp PRIVATE
         recomp_funcs
+        PatchesLib
         librecomp
         ultramodern
     )
@@ -124,6 +172,7 @@ else()
     target_link_libraries(WaveRace64Recomp PRIVATE
         -Wl,--start-group
         recomp_funcs
+        PatchesLib
         librecomp
         ultramodern
         -Wl,--end-group

@@ -138,6 +138,8 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 #include <SDL2/SDL_syswm.h>
 #endif
 
+#include "register_patches.h"
+
 static SDL_Window* sdl_window = nullptr;
 
 static void* create_gfx() {
@@ -286,6 +288,9 @@ int main(int argc, char* argv[]) {
     };
 
     recomp::overlays::register_overlays(section_table, overlays_by_index);
+
+    // Register the recompiled game patches (RecompiledPatches/).
+    wr64::register_patches();
 
     // -----------------------------------------------------------------------
     // 2. Register the game entry

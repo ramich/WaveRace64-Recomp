@@ -69,6 +69,36 @@ Keyboard: WASD = stick, X = A, Z = B, LShift = Z, Return = START, arrows = D-pad
 Q/E = L/R, IJKL = C-buttons, Esc = quit. Game controllers map automatically; the
 window title shows the game FPS.
 
+### RT64 developer tools
+
+Enable developer mode, then use the debug keys in-game:
+
+```powershell
+# Windows (PowerShell)
+$env:WR64_DEV = '1'
+.\build\WaveRace64Recomp.exe
+```
+
+```bash
+# Linux
+WR64_DEV=1 ./build/WaveRace64Recomp
+```
+
+| Key | Tool |
+|-----|------|
+| **F1** | RT64 Inspector (ImGui): render statistics/profiling, framebuffer views, user & enhancement configuration editors (resolution, aspect, MSAA, filtering -- applied live) |
+| **F2** | Toggle ray tracing (experimental RT64 feature) |
+| **F3** | Toggle raw-RDRAM framebuffer view (shows the game's original 320x240 output; brief artifacts when toggling back are a known RT64 quirk) |
+| **F4** | Toggle texture replacements |
+
+Without `WR64_DEV=1` these keys are deliberately inert (RT64 itself only guards F1;
+we gate the rest to keep players out of debug views).
+
+> **Note on frame rate:** Wave Race 64 natively runs at ~20 FPS (its game logic is
+> built around a 20 Hz update) — the title-bar FPS showing ~20 is authentic console
+> behavior, not a performance problem. A 60 FPS enhancement is on the roadmap and
+> requires game patches.
+
 ### Recompilation Statistics
 
 | Metric | Value |

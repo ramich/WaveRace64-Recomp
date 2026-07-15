@@ -42,3 +42,12 @@ rsp/
 *.log
 saves/
 waverace64.z64
+
+# Patches build output (regenerated from patches/*.c)
+patches/*.o
+patches/*.d
+patches/*.elf
+patches/*.bin
+patches/*.map
+patches/syms.ld
+RecompiledPatches/
