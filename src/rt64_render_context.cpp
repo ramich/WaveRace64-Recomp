@@ -580,22 +580,38 @@ public:
                 static const char* fov_env = std::getenv("WR64_POKE_FOV");
                 if (fov_env && fov_env[0] == '1') {
                     uint8_t* rdram = app_->core.RDRAM;
-                    static bool fov_scanned = false;
-                    if (!fov_scanned && update_count >= 240) {
-                        fov_scanned = true;
-                        int found = 0;
-                        for (uint32_t g = 0x80000010; g < 0x807FFFF0 && found < 256; g += 4) {
+                    // Rescan every ~10s: camera structs are created per scene
+                    // (demo/race cameras don't exist at boot), so a single
+                    // early scan misses them.
+                    static uint32_t next_scan = 240;
+                    if (update_count >= next_scan) {
+                        next_scan = update_count + 600;
+                        int added = 0;
+                        for (uint32_t g = 0x80000010; g < 0x807FFFF0; g += 4) {
                             uint32_t w = rd32g(rdram, g);
-                            if (w == 0x42340000u || w == 0x42960000u) {
+                            if (w != 0x42340000u && w != 0x42960000u) continue;
+                            bool known = false;
+                            for (const auto& e : s_poke_list) {
+                                if (e.addr == g) { known = true; break; }
+                            }
+                            if (!known && s_poke_list.size() < 512) {
                                 PokeCandidate c{};
                                 c.addr = g; c.kind = 2; c.w[0] = w;
                                 s_poke_list.push_back(c);
-                                found++;
+                                added++;
+                                if (update_count > 300) {
+                                    // Late arrivals are per-scene camera structs — log them.
+                                    fprintf(stderr, "[FOV] late candidate at 0x%08X (%s)\n",
+                                        g, (w == 0x42340000u) ? "45.0" : "75.0");
+                                }
                             }
                         }
                         s_poke_lo = 0;
                         s_poke_hi = s_poke_list.size();
-                        fprintf(stderr, "[FOV] widening %d camera FOV candidates 1.3x\n", found);
+                        if (added > 0) {
+                            fprintf(stderr, "[FOV] +%d new candidates (total %zu), widening 1.3x\n",
+                                added, s_poke_list.size());
+                        }
                     }
                 }
             }

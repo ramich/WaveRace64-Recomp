@@ -79,7 +79,33 @@ rt64_render_context.cpp):
 - Static immediates: code compares against 320/240 (full screen), not the inner
   rect — culling is not screen-rect based.
 
-**The frustum chain (best lead):** `guFrustumF2` (0x801EE274) has exactly one
+**CAMERA MODEL CRACKED (2026-07-15):** RT64's dialect-aware matrix decoder
+(temporary instrumentation in rt64_rsp.cpp matrixCommon) revealed the live
+projection: **guPerspective(fovy=45°, aspect=4:3)** — m11 = cot(22.5°) exactly,
+loaded via segment 3 (per-frame DL buffer at phys ~0x12D8F0). A second ~75° camera
+alternates during demos. Key findings from FOV poking (`WR64_POKE_FOV=1`, scans
+for 45.0f/75.0f floats with periodic rescan since camera structs spawn per scene):
+
+- **Widening the camera fovy widens the view AND object culling follows** —
+  poked framebuffers show racers/objects rendered across the full frame including
+  the former dead margins. Object culling reads the same camera FOV. ✔
+- **The detailed wave-mesh region does NOT follow** — its coverage is still sized
+  to the inner rect (visible seam). The water grid has separate bounds. ✘
+- fovy is written by inline 45.0f constants (`lui reg, 0x4234`) at:
+  0x80089C50 (funcs_5), 0x8009B1C8 (funcs_7), and six sites in the 0x8009Bxxx
+  dispatch-handler battery (funcs_8: 0x8009B93C, 0x8009BA40, 0x8009BB0C,
+  0x8009BBC4, 0x8009BCD0, 0x8009BED8) — per-camera-mode setters that store into
+  heap camera structs.
+
+**Remaining for shipping border removal:** (1) bisect the FOV candidates with the
+visual margin test to isolate the live camera struct; (2) read the funcs_8 handler
+code around one inline-45.0 site to learn the camera struct layout (fovy offset →
+neighbors = the rest of the camera params); (3) find the wave-grid bounds (likely
+computed from screen size or camera separately — the seam rectangle is the tell);
+(4) proper patch: fovy 45° → ~47.7° (320/302 wider) + wave-grid widen + scissor
+rewrite = seamless full-frame rendering.
+
+**The frustum chain (earlier dead end):** `guFrustumF2` (0x801EE274) has exactly one
 caller chain: `func_801EE46C` (guFrustum fixed-point wrapper) <- `func_800B4ABC`,
 which iterates a static struct array at **0x801D7B70** (stride 0x24; entry active
 when +0x00 != 0) and feeds guFrustum from fields +0x04 (int, left source, scaled
