@@ -20,7 +20,9 @@
 #include <cstdio>
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <atomic>
+#include <vector>
 
 #include <SDL2/SDL_events.h>
 
@@ -59,6 +61,204 @@ static void dummy_check_interrupts() {}
 
 // Live application pointer for event forwarding (single renderer instance).
 static std::atomic<RT64::Application*> s_app{nullptr};
+
+// ---------------------------------------------------------------------------
+// Culling-bounds bisection harness (RE tooling, env-driven; see
+// scripts/bisect_culling.py). The game culls objects/waves against its
+// original view rect; these hooks locate the responsible RDRAM variables:
+//   WR64_POKE_SCAN=1        scan RDRAM for view-rect-shaped s16 pairs at
+//                           ~5s and write them to poke_candidates.txt
+//   WR64_POKE_FILE=<path>   candidate list to poke
+//   WR64_POKE_RANGE=lo:hi   candidate index range [lo,hi) to poke (widen)
+//                           continuously every update
+// ---------------------------------------------------------------------------
+namespace {
+
+struct PokeCandidate {
+    uint32_t addr;    // guest address (s16 pair or f32 quad)
+    int kind;         // 0 = s16 view-rect pair, 1 = f32 clip-plane quad
+    uint16_t a, b;    // kind 0: original values
+    uint32_t w[4];    // kind 1: original f32 bit patterns [-x,+x,-y,+y]
+};
+static std::vector<PokeCandidate> s_poke_list;
+static bool s_poke_loaded = false;
+static size_t s_poke_lo = 0, s_poke_hi = 0;
+
+static uint16_t rd16g(uint8_t* rdram, uint32_t g) {
+    return *(uint16_t*)(rdram + ((g ^ 2) - 0x80000000u));
+}
+static void wr16g(uint8_t* rdram, uint32_t g, uint16_t v) {
+    *(uint16_t*)(rdram + ((g ^ 2) - 0x80000000u)) = v;
+}
+
+static bool is_low_bound(uint16_t v) { return v == 8 || v == 20; }
+static bool is_high_bound(uint16_t v) {
+    return v == 310 || v == 311 || v == 312 || v == 217 || v == 218 || v == 219 || v == 224;
+}
+static uint16_t widen_high(uint16_t v) { return (v >= 300) ? 320 : 240; }
+
+static uint32_t rd32g(uint8_t* rdram, uint32_t g) {
+    return *(uint32_t*)(rdram + (g - 0x80000000u));
+}
+static void wr32g(uint8_t* rdram, uint32_t g, uint32_t v) {
+    *(uint32_t*)(rdram + (g - 0x80000000u)) = v;
+}
+static float bits_to_f(uint32_t v) { float f; memcpy(&f, &v, 4); return f; }
+static uint32_t f_to_bits(float f) { uint32_t v; memcpy(&v, &f, 4); return v; }
+
+static void poke_scan(uint8_t* rdram, int mode) {
+    FILE* f = fopen("poke_candidates.txt", "w");
+    if (!f) return;
+    int count = 0;
+    if (mode == 1) {
+        // s16 view-rect pairs.
+        for (uint32_t g = 0x80000010; g < 0x807FFFF0 && count < 4096; g += 2) {
+            uint16_t a = rd16g(rdram, g), b = rd16g(rdram, g + 2);
+            if (is_low_bound(a) && is_high_bound(b)) {
+                fprintf(f, "S 0x%08X %u %u\n", g, a, b);
+                count++;
+            }
+        }
+    } else if (mode == 2) {
+        // f32 clip-plane quads [-x,+x,-y,+y] (PW64-style camera frustum).
+        for (uint32_t g = 0x80000010; g < 0x807FFFE0 && count < 4096; g += 4) {
+            float x0 = bits_to_f(rd32g(rdram, g));
+            float x1 = bits_to_f(rd32g(rdram, g + 4));
+            float y0 = bits_to_f(rd32g(rdram, g + 8));
+            float y1 = bits_to_f(rd32g(rdram, g + 12));
+            if (!(x0 < 0 && y0 < 0)) continue;
+            if (x1 != -x0 || y1 != -y0) continue;
+            float ax = x1, ay = y1;
+            if (ax < 0.15f || ax > 1.6f || ay < 0.08f || ay > 1.2f) continue;
+            if (ax <= ay) continue; // x half-extent should exceed y (4:3-ish)
+            fprintf(f, "F 0x%08X 0x%08X 0x%08X 0x%08X 0x%08X\n", g,
+                rd32g(rdram, g), rd32g(rdram, g + 4), rd32g(rdram, g + 8), rd32g(rdram, g + 12));
+            count++;
+        }
+    } else {
+        // mode 3: aspect-ratio constants (1.3333f = 0x3FAAAAAB — the value the
+        // community widescreen GameShark codes patch). Poked as single floats.
+        for (uint32_t g = 0x80000010; g < 0x807FFFF0 && count < 4096; g += 4) {
+            uint32_t w = rd32g(rdram, g);
+            if (w == 0x3FAAAAABu || w == 0x3FAAAAAAu) {
+                fprintf(f, "A 0x%08X 0x%08X\n", g, w);
+                count++;
+            }
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "[POKE] scan mode %d complete: %d candidates\n", mode, count);
+}
+
+static void poke_load() {
+    s_poke_loaded = true;
+    const char* file = std::getenv("WR64_POKE_FILE");
+    const char* range = std::getenv("WR64_POKE_RANGE");
+    if (!file || !range) return;
+    FILE* f = fopen(file, "r");
+    if (!f) return;
+    char kind = 0;
+    unsigned int addr = 0, a = 0, b = 0;
+    unsigned int w0, w1, w2, w3;
+    while (fscanf(f, " %c", &kind) == 1) {
+        PokeCandidate c{};
+        if (kind == 'S' && fscanf(f, "%x %u %u", &addr, &a, &b) == 3) {
+            c.addr = addr; c.kind = 0; c.a = (uint16_t)a; c.b = (uint16_t)b;
+            s_poke_list.push_back(c);
+        } else if (kind == 'F' && fscanf(f, "%x %x %x %x %x", &addr, &w0, &w1, &w2, &w3) == 5) {
+            c.addr = addr; c.kind = 1;
+            c.w[0] = w0; c.w[1] = w1; c.w[2] = w2; c.w[3] = w3;
+            s_poke_list.push_back(c);
+        } else if (kind == 'A' && fscanf(f, "%x %x", &addr, &w0) == 2) {
+            c.addr = addr; c.kind = 2; c.w[0] = w0;
+            s_poke_list.push_back(c);
+        } else {
+            break;
+        }
+    }
+    fclose(f);
+    unsigned long lo = 0, hi = 0;
+    if (sscanf(range, "%lu:%lu", &lo, &hi) == 2) {
+        s_poke_lo = lo;
+        s_poke_hi = (hi > s_poke_list.size()) ? s_poke_list.size() : hi;
+    }
+    fprintf(stderr, "[POKE] loaded %zu candidates, poking [%zu,%zu)\n",
+        s_poke_list.size(), s_poke_lo, s_poke_hi);
+}
+
+// Targeted frustum poke (WR64_POKE_FRUSTUM=1): the camera/frustum parameter
+// structs live in a static array at 0x801D7B70 (stride 0x24; entry active when
+// word +0x00 != 0). func_800B4ABC feeds guFrustum from fields +0x04 (int, left
+// source), +0x1C (f32, right source), +0x14 (f32, top source). Scale them 1.3x
+// to test whether widening the frustum fills the culled margins.
+static void poke_frustum(uint8_t* rdram) {
+    constexpr uint32_t BASE = 0x801D7B70;
+    constexpr uint32_t STRIDE = 0x24;
+    constexpr float SCALE = 1.3f;
+    static uint32_t last_written[8][3] = {};
+    static bool logged = false;
+    for (int i = 0; i < 8; i++) {
+        uint32_t entry = BASE + i * STRIDE;
+        if (rd32g(rdram, entry) == 0) continue;
+        if (!logged) {
+            logged = true;
+            fprintf(stderr, "[FRUSTUM] entry %d active: int4=%d r=%f t=%f\n", i,
+                (int32_t)rd32g(rdram, entry + 0x04),
+                bits_to_f(rd32g(rdram, entry + 0x1C)),
+                bits_to_f(rd32g(rdram, entry + 0x14)));
+        }
+
+        uint32_t v_int = rd32g(rdram, entry + 0x04);
+        uint32_t v_r = rd32g(rdram, entry + 0x1C);
+        uint32_t v_t = rd32g(rdram, entry + 0x14);
+
+        if (v_int != last_written[i][0]) {
+            int32_t scaled = (int32_t)((int32_t)v_int * SCALE);
+            wr32g(rdram, entry + 0x04, (uint32_t)scaled);
+            last_written[i][0] = (uint32_t)scaled;
+        }
+        if (v_r != last_written[i][1]) {
+            uint32_t scaled = f_to_bits(bits_to_f(v_r) * SCALE);
+            wr32g(rdram, entry + 0x1C, scaled);
+            last_written[i][1] = scaled;
+        }
+        if (v_t != last_written[i][2]) {
+            uint32_t scaled = f_to_bits(bits_to_f(v_t) * SCALE);
+            wr32g(rdram, entry + 0x14, scaled);
+            last_written[i][2] = scaled;
+        }
+    }
+}
+
+static void poke_apply(uint8_t* rdram) {
+    for (size_t i = s_poke_lo; i < s_poke_hi; i++) {
+        const PokeCandidate& c = s_poke_list[i];
+        // Only poke while the location still holds the original values (heap
+        // data may have been reused; the game may also rewrite per frame, in
+        // which case this re-fires every update).
+        if (c.kind == 0) {
+            if (rd16g(rdram, c.addr) == c.a && rd16g(rdram, c.addr + 2) == c.b) {
+                wr16g(rdram, c.addr, 0);
+                wr16g(rdram, c.addr + 2, widen_high(c.b));
+            }
+        } else if (c.kind == 1) {
+            if (rd32g(rdram, c.addr) == c.w[0] && rd32g(rdram, c.addr + 4) == c.w[1] &&
+                rd32g(rdram, c.addr + 8) == c.w[2] && rd32g(rdram, c.addr + 12) == c.w[3]) {
+                // Widen the frustum dramatically (1.5x) so hits are obvious.
+                for (int k = 0; k < 4; k++) {
+                    wr32g(rdram, c.addr + k * 4, f_to_bits(bits_to_f(c.w[k]) * 1.5f));
+                }
+            }
+        } else {
+            // Aspect constant: widen 1.3x (visible zoom-out / wider view).
+            if (rd32g(rdram, c.addr) == c.w[0]) {
+                wr32g(rdram, c.addr, f_to_bits(bits_to_f(c.w[0]) * 1.3f));
+            }
+        }
+    }
+}
+
+} // namespace
 // Whether developer tooling is enabled; gates ALL RT64 debug shortcuts.
 // (RT64 itself only gates F1/Inspector — F2/F3/F4 toggle ray tracing, the raw
 // RDRAM framebuffer view, and texture replacements even in normal play, which
@@ -313,6 +513,25 @@ public:
             if ((update_count % 300) == 0) {
                 fprintf(stderr, "[WR64] update_screen count=%u\n", update_count);
             }
+
+            // Culling-bounds bisection harness (see scripts/bisect_culling.py).
+            {
+                const char* scan_env = std::getenv("WR64_POKE_SCAN");
+                if (scan_env && scan_env[0] >= '1' && scan_env[0] <= '9' && update_count == 300) {
+                    poke_scan(app_->core.RDRAM, scan_env[0] - '0');
+                }
+                if (!s_poke_loaded) {
+                    poke_load();
+                }
+                if (s_poke_hi > s_poke_lo) {
+                    poke_apply(app_->core.RDRAM);
+                }
+                static const char* frustum_env = std::getenv("WR64_POKE_FRUSTUM");
+                if (frustum_env && frustum_env[0] == '1') {
+                    poke_frustum(app_->core.RDRAM);
+                }
+            }
+
             if (update_count == 600 || update_count == 1800 || update_count == 3000) {
                 const char* dump_env = std::getenv("WR64_FB_DUMP");
                 if (dump_env && dump_env[0] == '1') {

@@ -158,10 +158,21 @@ static ultramodern::renderer::WindowHandle create_window(void* /*gfx_data*/) {
 #else
     constexpr Uint32 window_flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 #endif
+    // Size the window to fit the display's usable area (fixed 1280x960 is
+    // taller than many laptop screens once DPI scaling and the taskbar are
+    // accounted for, leaving the title bar off-screen).
+    int win_w = 1280, win_h = 960;
+    SDL_Rect usable{};
+    if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && usable.w > 0 && usable.h > 0) {
+        int max_h = (int)(usable.h * 0.90f);
+        int max_w = (int)(usable.w * 0.95f);
+        if (win_h > max_h) { win_h = max_h; win_w = win_h * 4 / 3; }
+        if (win_w > max_w) { win_w = max_w; win_h = win_w * 3 / 4; }
+    }
     sdl_window = SDL_CreateWindow(
         "Wave Race 64",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        1280, 960,
+        win_w, win_h,
         window_flags
     );
     if (!sdl_window) {
@@ -195,6 +206,24 @@ static void update_gfx(void* /*gfx_data*/) {
                 break;
             default:
                 break;
+        }
+    }
+
+    // One-shot safeguard: if the window ends up with its title bar off-screen
+    // (can happen with DPI/multi-monitor centering and post-setup resizes),
+    // pull it back into view. Checked ~2s in so RT64's setup has settled.
+    static uint32_t position_check_ticks = 0;
+    if (position_check_ticks != UINT32_MAX && sdl_window != nullptr) {
+        uint32_t now_ticks = SDL_GetTicks();
+        if (position_check_ticks == 0) {
+            position_check_ticks = now_ticks;
+        } else if (now_ticks - position_check_ticks > 2000) {
+            position_check_ticks = UINT32_MAX;
+            int x = 0, y = 0;
+            SDL_GetWindowPosition(sdl_window, &x, &y);
+            if (y < 0 || x < -100) {
+                SDL_SetWindowPosition(sdl_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+            }
         }
     }
 
