@@ -68,10 +68,26 @@ Dead ends eliminated (static analysis):
 - No float screen-bound constants (312.0f/310.0f/218.0f/302.0f/198.0f) appear as
   lui immediates anywhere — culling is integer-based or computed.
 
-Next approach (dynamic): a scan-and-poke bisection harness — locate {8,312}/{20,218}
-value patterns in RDRAM at runtime, widen them in batches from the native side, and
-diff framebuffer dumps to identify which addresses actually control culling. The
-winning addresses then reveal their owning struct/function for a proper patch.
+Bisection harness results (scripts/bisect_culling.py, native poke engine in
+rt64_render_context.cpp):
+- s16 view-rect pairs {8|20, 310..312|217..224}: 14 candidates, widening all gave
+  no margin improvement.
+- PW64-style f32 clip-plane quads [-x,+x,-y,+y]: zero hits — WR64's camera is not
+  PW64-shaped.
+- 1.3333f (0x3FAAAAAB) aspect constants: zero hits in all of RDRAM — the community
+  GameShark widescreen addresses likely target Rev 0; our ROM is Rev A.
+- Static immediates: code compares against 320/240 (full screen), not the inner
+  rect — culling is not screen-rect based.
+
+**The frustum chain (best lead):** `guFrustumF2` (0x801EE274) has exactly one
+caller chain: `func_801EE46C` (guFrustum fixed-point wrapper) <- `func_800B4ABC`,
+which iterates a static struct array at **0x801D7B70** (stride 0x24; entry active
+when +0x00 != 0) and feeds guFrustum from fields +0x04 (int, left source, scaled
+<<3 and negated), +0x1C (f32, right source, negated), +0x14 (f32, top source);
+near/far/scale from +0x08/+0x0C/+0x10. `WR64_POKE_FRUSTUM=1` widens l/r/t by 1.3x.
+**The array is INACTIVE during attract demos** (they use an overlay camera path) —
+test interactively in a real race: if the view widens, this is the gameplay
+projection source and likely feeds culling and the wave grid too.
 
 - HUD elements stretch in widescreen (user-observed). The HUD is drawn in 2D ortho
   coordinates; keeping it 4:3 needs either RT64 extended-GBI tagging or game
