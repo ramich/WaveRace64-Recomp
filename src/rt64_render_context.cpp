@@ -155,6 +155,15 @@ public:
             app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Expand;
         }
 
+        // Experimental high-FPS: present at the display's refresh rate and let
+        // RT64 interpolate transforms between the game's native 20 Hz frames
+        // (the Zelda64Recomp approach; no 60fps GameShark code ever existed
+        // for this game — its logic rate is hard-coded). WR64_HIGHFPS=1.
+        const char* highfps_env = std::getenv("WR64_HIGHFPS");
+        if (highfps_env && highfps_env[0] == '1') {
+            app_->userConfig.refreshRate = RT64::UserConfiguration::RefreshRate::Display;
+        }
+
         // Attempt setup.
         auto result = app_->setup(0);
 
