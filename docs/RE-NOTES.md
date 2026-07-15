@@ -38,6 +38,16 @@ NTSC-U widescreen code patches their high halfwords to 0x3FE3 (1.7777 = 16:9):
   exists** (Project64 community consensus: "hard-coded", "would be a dream").
 - Recomp-native path: RT64 transform interpolation at display refresh rate
   (`WR64_HIGHFPS=1`, experimental) — the Zelda64Recomp approach, no logic change.
+  **User-verified working** (2026-07-15): motion is smooth at display rate.
+- **Known artifact: stuttering clouds.** RT64 interpolates by matching transforms
+  across consecutive game frames; the sky clouds are (very likely) billboards whose
+  vertex data is regenerated in world space every game frame — no stable matrix to
+  match, so they snap at 20 Hz while everything else glides. Zelda64Recomp solved
+  this class of problem with extended-GBI tagging patches (marking draws with
+  stable interpolation IDs). Fix path here: find the cloud/sky draw function
+  (probably near the skybox rendering; search DL for the cloud texture loads) and
+  either tag it via extended GBI or make RT64 skip-interpolate it. Requires the
+  patches pipeline (available) + RE of the sky renderer (not started).
 - True logic-rate change would need the physics timestep and frame counters
   found and patched — major RE effort.
 

@@ -64,7 +64,8 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 |---------|--------|
 | `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
 | `WR64_BORDERS=1` | Keep the game's original black overscan borders (default: removed) |
-| `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump.bin` ~10s in (`scripts/measure_borders.py`) |
+| `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
+| `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: clouds stutter (billboards regenerate per game frame and can't be matched for interpolation — see `docs/RE-NOTES.md`) |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F2 ray tracing, F3 raw-RDRAM view, F4 texture replacements. Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
 
