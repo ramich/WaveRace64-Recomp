@@ -52,16 +52,19 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 - **Widescreen rough edges** (needs game patches): the HUD stretches with the window
   instead of staying at its original aspect, and objects can pop in at the screen
   edges because the game culls against the 4:3 frustum
-- **Black borders** around the game image — drawn by the game itself inside its
-  320x240 framebuffer (its own overscan compensation; RT64 presents edge-to-edge,
-  verified via VI viewport instrumentation). Removing them needs a game patch that
-  widens the game's internal viewport, same as Pilotwings64Recomp's border patch
+- ~~**Black borders** around the game image~~ **Fixed:** the game draws CRT-overscan
+  borders inside its own framebuffer via G_SETSCISSOR commands built by 20+ functions
+  across the scene overlays; the port rewrites near-fullscreen scissors in the display
+  list at submission time (split-screen scissors are untouched). `WR64_BORDERS=1`
+  restores the original borders
 
 ### Environment variables & keys
 
 | Setting | Effect |
 |---------|--------|
 | `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
+| `WR64_BORDERS=1` | Keep the game's original black overscan borders (default: removed) |
+| `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump.bin` ~10s in (`scripts/measure_borders.py`) |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F2 ray tracing, F3 raw-RDRAM view, F4 texture replacements. Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
 

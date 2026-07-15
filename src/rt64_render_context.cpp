@@ -241,6 +241,38 @@ public:
         uint32_t ucode_data_phys = static_cast<uint32_t>(task->t.ucode_data) & 0x3FFFFFFu;
         uint32_t dl_start_phys   = static_cast<uint32_t>(task->t.data_ptr)   & 0x3FFFFFFu;
 
+        // Border removal: the game scissors rendering to ~(8,20)-(310,218),
+        // drawing black CRT-overscan borders inside its own framebuffer. The
+        // scissor commands are built by 20+ functions across the scene
+        // overlays, so instead of patching each site, rewrite the
+        // G_SETSCISSOR commands in the display list before RT64 processes it.
+        // Only near-fullscreen scissors are expanded — split-screen and other
+        // intentional sub-rect scissors (e.g. y0=122) are left alone.
+        // WR64_BORDERS=1 keeps the original borders.
+        {
+            static const char* borders_env = std::getenv("WR64_BORDERS");
+            if (!(borders_env && borders_env[0] == '1')) {
+                uint8_t* rdram = app_->core.RDRAM;
+                uint32_t addr = dl_start_phys;
+                for (int i = 0; i < 0x4000; i++, addr += 8) {
+                    uint32_t w0 = *(uint32_t*)(rdram + addr);
+                    uint8_t op = w0 >> 24;
+                    if (op == 0xB8) { // G_ENDDL (F3DEX)
+                        break;
+                    }
+                    if (op == 0xED) { // G_SETSCISSOR, coords are 10.2 fixed
+                        uint32_t w1 = *(uint32_t*)(rdram + addr + 4);
+                        uint32_t x0 = (w0 >> 12) & 0xFFF, y0 = w0 & 0xFFF;
+                        uint32_t x1 = (w1 >> 12) & 0xFFF, y1 = w1 & 0xFFF;
+                        if (x0 <= 40 && y0 <= 88 && x1 >= 1200 && y1 >= 856) {
+                            *(uint32_t*)(rdram + addr) = 0xED000000u;
+                            *(uint32_t*)(rdram + addr + 4) = (w1 & 0xFF000000u) | (1280u << 12) | 960u;
+                        }
+                    }
+                }
+            }
+        }
+
         // Reset the RSP state machine before processing each new display list.
         // This prevents prior-frame geometry or matrix state from leaking.
         app_->state->rsp->reset();
@@ -263,6 +295,30 @@ public:
 
     void update_screen() override {
         if (app_) {
+            // Diagnostics: WR64_FB_DUMP=1 dumps the 320x240 framebuffer to
+            // fb_dump.bin (RGBA5551 LE) ~10s in, for offline analysis with
+            // scripts/measure_borders.py.
+            static uint32_t update_count = 0;
+            if (++update_count == 600) {
+                const char* dump_env = std::getenv("WR64_FB_DUMP");
+                if (dump_env && dump_env[0] == '1') {
+                    uint8_t* rdram = app_->core.RDRAM;
+                    auto rd16 = [&](uint32_t g) -> uint16_t {
+                        return *(uint16_t*)(rdram + ((g ^ 2) - 0x80000000u));
+                    };
+                    auto* vi_regs = ultramodern::renderer::get_vi_regs();
+                    uint32_t fb_guest = 0x80000000u | (vi_regs->VI_ORIGIN_REG & 0x3FFFFFu);
+                    FILE* fb = fopen("fb_dump.bin", "wb");
+                    if (fb) {
+                        for (uint32_t i = 0; i < 320u * 240u; i++) {
+                            uint16_t px = rd16(fb_guest + i * 2);
+                            fwrite(&px, 2, 1, fb);
+                        }
+                        fclose(fb);
+                        fprintf(stderr, "[WR64] framebuffer dumped from 0x%08X\n", fb_guest);
+                    }
+                }
+            }
             app_->updateScreen();
         }
     }

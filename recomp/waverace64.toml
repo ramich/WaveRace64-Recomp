@@ -40,13 +40,7 @@ ignored = [
 # Single-instruction patches
 # Format: func = "function_name", vram = 0xADDRESS, value = 0xINSTRUCTION
 
-# TODO: Add patches as needed during testing. Common needs:
-# - Redirect audio DMA to cached addresses (kseg0 instead of kseg1)
-# - Disable RCP timeout detection
-# - Fix any direct hardware register access
-
-# Example (disabled):
-# [[patches.instruction]]
-# func = "some_function"
-# vram = 0x80XXXXXX
-# value = 0x00000000  # nop
+# NOTE: Border removal is done at runtime by rewriting G_SETSCISSOR commands
+# in the display list (src/rt64_render_context.cpp, send_dl) — the border
+# scissor is built by 20+ functions across the scene overlays, so per-site
+# instruction patches don't scale. WR64_BORDERS=1 keeps the original borders.
