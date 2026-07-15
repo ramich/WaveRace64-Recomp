@@ -21,8 +21,8 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 | **Phase 3** | Runtime Integration | **COMPLETE** |
 | **Phase 4** | Build & Link (RT64 + Runtime) | **COMPLETE** |
 | **Phase 5** | Audio & Input | **COMPLETE** -- input verified by hand, audio via recompiled RSP microcode at 32 kHz |
-| **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode stable 2+ min; races being play-tested |
-| **Phase 7** | Enhancements | Not Started |
+| **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode fully stable; races being play-tested |
+| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand), FPS counter, dev inspector |
 | **Phase 8** | Release Preparation | Not Started |
 
 > **Playable (early).** The game boots, renders attract mode stably, menus respond to
@@ -48,7 +48,24 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 - **Controller Pak:** Stub functions only (osPfs*)
 - **Symbol map:** JAL-scan derived; indirect-call targets are still being discovered
   during play-testing (automated fix loop: `scripts/bringup_loop.ps1`)
-- **No settings UI yet** (resolution/rebinding via code only)
+- **No settings UI yet** (settings via environment variables, see below)
+- **Widescreen rough edges** (needs game patches): the HUD stretches with the window
+  instead of staying at its original aspect, and objects can pop in at the screen
+  edges because the game culls against the 4:3 frustum
+- **Black borders** around the game image (the N64 VI signal's overscan margins,
+  reproduced faithfully by RT64)
+
+### Environment variables & keys
+
+| Setting | Effect |
+|---------|--------|
+| `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
+| `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F2 ray tracing, F3 raw-RDRAM view, F4 texture replacements. Debug keys are inert without this. |
+| `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
+
+Keyboard: WASD = stick, X = A, Z = B, LShift = Z, Return = START, arrows = D-pad,
+Q/E = L/R, IJKL = C-buttons, Esc = quit. Game controllers map automatically; the
+window title shows the game FPS.
 
 ### Recompilation Statistics
 
