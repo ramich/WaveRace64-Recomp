@@ -46,6 +46,20 @@ Progress since the initial report (sections below describe the original state):
    NOTE: the recompiled ucode's "Unhandled jump target" diagnostic prints to STDOUT,
    not stderr — capture both when hunting targets.
 
+5. **Audio stutter fixed** (periodic ~16ms dropouts every few hundred ms, most
+   audible in music). Diagnosed by elimination with instrumentation at each layer:
+   - underrun counters at the submission point: zero underruns, but the SDL queue
+     grew unboundedly (~4–8 KB/s surplus);
+   - per-submission timing: perfectly steady 16.6ms cadence (buffer sizes
+     alternating 1056/1120 samples — averaging the console-exact 32006.45 Hz rate);
+   - raw stream dump + `scripts/analyze_audio_dump.py`: the generated audio was
+     flawless — no gaps, clicks, or duplicate blocks.
+   Conclusion: the dropouts happened in the OS playback path — a 512-frame (16ms)
+   SDL device buffer made the feed deadline too tight under game CPU load; missed
+   deadlines glitched the device *and* backed up the queue (explaining the growth).
+   Fix: 2048-frame (~64ms) device buffer. User-confirmed clean.
+   The dump tooling remains available via `WR64_AUDIO_DUMP=1`.
+
 **Next:** play-test races to flush remaining missing handlers (each is a ~3-minute
 automated fix via the loop scripts), then the patches pipeline for enhancements
 (widescreen), an ImGui settings overlay, and the upstream PRs (Windows fixes +

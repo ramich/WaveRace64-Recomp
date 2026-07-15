@@ -51,7 +51,10 @@ static void ensure_audio_device(uint32_t freq) {
     desired.freq     = static_cast<int>(freq);
     desired.format   = AUDIO_S16SYS;
     desired.channels = 2;       // Stereo
-    desired.samples  = 512;     // Buffer size in samples per channel
+    // 2048 frames (~64ms at 32kHz): 512 (16ms) made the OS-side feed deadline
+    // tight enough that scheduler jitter under game load caused periodic
+    // device-level dropouts (audible stutter), even with a full queue.
+    desired.samples  = 2048;
     desired.callback = nullptr; // Use SDL_QueueAudio instead of callback
 
     SDL_AudioSpec obtained{};
@@ -80,6 +83,16 @@ void audio_queue_samples(int16_t* samples, size_t count) {
 
     if (audio_device == 0 || samples == nullptr || count == 0) {
         return;
+    }
+
+    // Diagnostics: dump the raw stream (s16 interleaved stereo @ device rate)
+    // for offline waveform analysis (scripts/analyze_audio_dump.py). Opt-in via
+    // WR64_AUDIO_DUMP=1 — keeps file I/O out of the audio path in normal play.
+    if (const char* dump_env = SDL_getenv("WR64_AUDIO_DUMP"); dump_env && dump_env[0] == '1') {
+        static FILE* dump = fopen("audio_dump.raw", "wb");
+        if (dump) {
+            fwrite(samples, sizeof(int16_t), count, dump);
+        }
     }
 
     // count is the number of int16_t values (so byte count = count * 2).
