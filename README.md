@@ -52,8 +52,10 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 - **Widescreen rough edges** (needs game patches): the HUD stretches with the window
   instead of staying at its original aspect, and objects can pop in at the screen
   edges because the game culls against the 4:3 frustum
-- **Black borders** around the game image (the N64 VI signal's overscan margins,
-  reproduced faithfully by RT64)
+- **Black borders** around the game image — drawn by the game itself inside its
+  320x240 framebuffer (its own overscan compensation; RT64 presents edge-to-edge,
+  verified via VI viewport instrumentation). Removing them needs a game patch that
+  widens the game's internal viewport, same as Pilotwings64Recomp's border patch
 
 ### Environment variables & keys
 
