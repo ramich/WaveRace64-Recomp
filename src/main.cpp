@@ -178,6 +178,10 @@ static ultramodern::renderer::WindowHandle create_window(void* /*gfx_data*/) {
 static void update_gfx(void* /*gfx_data*/) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        // Give RT64 first look (developer inspector input, F1-F4 shortcuts).
+        if (wr64::rt64_handle_sdl_event(&event)) {
+            continue;
+        }
         switch (event.type) {
             case SDL_QUIT:
                 ultramodern::quit();
@@ -190,6 +194,20 @@ static void update_gfx(void* /*gfx_data*/) {
             default:
                 break;
         }
+    }
+
+    // Title-bar FPS counter: game frames (display lists submitted) per second.
+    static uint32_t last_ticks = 0;
+    uint32_t now = SDL_GetTicks();
+    if (now - last_ticks >= 1000) {
+        uint32_t frames = wr64::rt64_consume_frame_count();
+        if (last_ticks != 0 && sdl_window != nullptr) {
+            char title[64];
+            SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS",
+                         frames * 1000.0f / (now - last_ticks));
+            SDL_SetWindowTitle(sdl_window, title);
+        }
+        last_ticks = now;
     }
 }
 

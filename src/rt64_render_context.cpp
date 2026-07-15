@@ -19,6 +19,10 @@
 
 #include <cstdio>
 #include <cassert>
+#include <cstdlib>
+#include <atomic>
+
+#include <SDL2/SDL_events.h>
 
 #include "ultramodern/renderer_context.hpp"
 #include "ultramodern/config.hpp"
@@ -52,6 +56,11 @@ static unsigned int s_DPC_TMEM_REG    = 0;
 
 // No-op interrupt check — the recompiler runtime handles interrupts itself.
 static void dummy_check_interrupts() {}
+
+// Live application pointer for event forwarding (single renderer instance).
+static std::atomic<RT64::Application*> s_app{nullptr};
+// Game frames (display lists) submitted since last consumption, for FPS display.
+static std::atomic<uint32_t> s_frame_count{0};
 
 // ---------------------------------------------------------------------------
 // RT64 RendererContext subclass
@@ -132,6 +141,15 @@ public:
         // Enable developer/debug mode if requested.
         app_->userConfig.developerMode = developer_mode;
 
+        // Widescreen: expand the 3D aspect ratio to fill the window (same
+        // mechanism Zelda64Recomp uses). Known limitation without game patches:
+        // objects can pop in at the screen edges because the game culls against
+        // the original 4:3 frustum. Set WR64_WIDESCREEN=0 to force 4:3.
+        const char* ws_env = std::getenv("WR64_WIDESCREEN");
+        if (!(ws_env && ws_env[0] == '0')) {
+            app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Expand;
+        }
+
         // Attempt setup.
         auto result = app_->setup(0);
 
@@ -176,9 +194,11 @@ public:
 
         printf("[WR64-RT64] Renderer context created (result=%d, api=%d)\n",
                static_cast<int>(result), static_cast<int>(chosen_api));
+        s_app.store(app_.get());
     }
 
     ~RT64Context() override {
+        s_app.store(nullptr);
         if (app_) {
             app_->end();
         }
@@ -216,9 +236,6 @@ public:
         uint32_t ucode_data_phys = static_cast<uint32_t>(task->t.ucode_data) & 0x3FFFFFFu;
         uint32_t dl_start_phys   = static_cast<uint32_t>(task->t.data_ptr)   & 0x3FFFFFFu;
 
-        fprintf(stderr, "[WR64-RT64] send_dl: ucode=0x%07X ucode_data=0x%07X data_ptr=0x%07X\n",
-                ucode_phys, ucode_data_phys, dl_start_phys);
-
         // Reset the RSP state machine before processing each new display list.
         // This prevents prior-frame geometry or matrix state from leaking.
         app_->state->rsp->reset();
@@ -236,7 +253,7 @@ public:
             true  // HLE mode
         );
 
-        fprintf(stderr, "[WR64-RT64] send_dl: DONE\n");
+        s_frame_count.fetch_add(1, std::memory_order_relaxed);
     }
 
     void update_screen() override {
@@ -278,6 +295,12 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
     ultramodern::renderer::WindowHandle window_handle,
     bool developer_mode
 ) {
+    // WR64_DEV=1 enables RT64's developer inspector (toggle in-game with F1).
+    const char* dev_env = std::getenv("WR64_DEV");
+    if (dev_env && dev_env[0] == '1') {
+        developer_mode = true;
+    }
+
     auto ctx = std::make_unique<RT64Context>(rdram, window_handle, developer_mode);
     if (!ctx->valid()) {
         fprintf(stderr, "[WR64-RT64] Failed to create render context (result=%d)\n",
@@ -285,6 +308,18 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
         return nullptr;
     }
     return ctx;
+}
+
+bool rt64_handle_sdl_event(void* sdl_event) {
+    RT64::Application* app = s_app.load();
+    if (app == nullptr || sdl_event == nullptr) {
+        return false;
+    }
+    return app->sdlEventFilter(static_cast<SDL_Event*>(sdl_event));
+}
+
+uint32_t rt64_consume_frame_count() {
+    return s_frame_count.exchange(0, std::memory_order_relaxed);
 }
 
 } // namespace wr64

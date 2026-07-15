@@ -31,6 +31,19 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
     bool developer_mode
 );
 
+/**
+ * Forward an SDL event to RT64 (developer inspector input, F1-F4 shortcuts).
+ * @param sdl_event Pointer to an SDL_Event (typed void* to keep SDL out of this header).
+ * @return true if RT64 consumed the event.
+ */
+bool rt64_handle_sdl_event(void* sdl_event);
+
+/**
+ * Returns the number of game frames (display lists) submitted since the last
+ * call, for FPS display. Thread-safe.
+ */
+uint32_t rt64_consume_frame_count();
+
 } // namespace wr64
 
 #endif // WR64_RT64_RENDER_CONTEXT_H
