@@ -135,12 +135,24 @@ static void poke_scan(uint8_t* rdram, int mode) {
                 rd32g(rdram, g), rd32g(rdram, g + 4), rd32g(rdram, g + 8), rd32g(rdram, g + 12));
             count++;
         }
-    } else {
-        // mode 3: aspect-ratio constants (1.3333f = 0x3FAAAAAB — the value the
+    } else if (mode == 3) {
+        // aspect-ratio constants (1.3333f = 0x3FAAAAAB — the value the
         // community widescreen GameShark codes patch). Poked as single floats.
         for (uint32_t g = 0x80000010; g < 0x807FFFF0 && count < 4096; g += 4) {
             uint32_t w = rd32g(rdram, g);
             if (w == 0x3FAAAAABu || w == 0x3FAAAAAAu) {
+                fprintf(f, "A 0x%08X 0x%08X\n", g, w);
+                count++;
+            }
+        }
+    } else {
+        // mode 4: camera FOV values. RT64 telemetry proved the live projection
+        // is guPerspective(fovy=45deg, 4:3): m11 == cot(22.5deg). The camera
+        // struct holds fovy as a float — scan for 45.0f (0x42340000) and the
+        // demo cam's ~75.0f (0x42960000). Poked as single floats (x1.3).
+        for (uint32_t g = 0x80000010; g < 0x807FFFF0 && count < 4096; g += 4) {
+            uint32_t w = rd32g(rdram, g);
+            if (w == 0x42340000u || w == 0x42960000u) {
                 fprintf(f, "A 0x%08X 0x%08X\n", g, w);
                 count++;
             }
@@ -560,6 +572,31 @@ public:
                 static const char* frustum_env = std::getenv("WR64_POKE_FRUSTUM");
                 if (frustum_env && frustum_env[0] == '1') {
                     poke_frustum(app_->core.RDRAM);
+                }
+                // WR64_POKE_FOV=1: self-contained FOV widening experiment.
+                // Scans for camera FOV floats (45.0/75.0 — values proven live
+                // by RT64 projection telemetry) shortly after boot and widens
+                // every hit 1.3x continuously.
+                static const char* fov_env = std::getenv("WR64_POKE_FOV");
+                if (fov_env && fov_env[0] == '1') {
+                    uint8_t* rdram = app_->core.RDRAM;
+                    static bool fov_scanned = false;
+                    if (!fov_scanned && update_count >= 240) {
+                        fov_scanned = true;
+                        int found = 0;
+                        for (uint32_t g = 0x80000010; g < 0x807FFFF0 && found < 256; g += 4) {
+                            uint32_t w = rd32g(rdram, g);
+                            if (w == 0x42340000u || w == 0x42960000u) {
+                                PokeCandidate c{};
+                                c.addr = g; c.kind = 2; c.w[0] = w;
+                                s_poke_list.push_back(c);
+                                found++;
+                            }
+                        }
+                        s_poke_lo = 0;
+                        s_poke_hi = s_poke_list.size();
+                        fprintf(stderr, "[FOV] widening %d camera FOV candidates 1.3x\n", found);
+                    }
                 }
             }
 
