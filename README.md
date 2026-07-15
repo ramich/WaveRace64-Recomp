@@ -54,10 +54,11 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
   edges because the game culls against the 4:3 frustum
 - **Black borders** around the game image: drawn by the game inside its framebuffer
   (CRT overscan compensation). Scissor-rewrite removal exists (`WR64_BORDERS=0`,
-  experimental) but the game also culls objects/waves against the original view rect,
-  leaving the revealed margins half-rendered with a color seam — full removal needs
-  the culling bounds widened (game patch, in progress; shares its fix with widescreen
-  edge pop-in)
+  experimental) but the revealed margins are half-rendered. Root cause now mostly
+  cracked (see `docs/RE-NOTES.md`): the game renders guPerspective(45°, 4:3) and
+  **object culling follows the camera FOV** (verified by widening it — objects render
+  in the margins); the detailed wave-mesh region is sized independently and is the
+  last remaining blocker. Shares its fix with widescreen edge pop-in
 
 ### Environment variables & keys
 
@@ -67,6 +68,7 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 | `WR64_BORDERS=0` | Experimental border removal via scissor rewrite. Currently reveals margins the game doesn't fully render (objects/waves are culled to the original view rect, with a visible color seam) — default is original borders until the culling patch lands |
 | `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
 | `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: clouds stutter (billboards regenerate per game frame and can't be matched for interpolation — see `docs/RE-NOTES.md`) |
+| `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F2 ray tracing, F3 raw-RDRAM view, F4 texture replacements. Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
 

@@ -97,6 +97,16 @@ for 45.0f/75.0f floats with periodic rescan since camera structs spawn per scene
   0x8009BBC4, 0x8009BCD0, 0x8009BED8) — per-camera-mode setters that store into
   heap camera structs.
 
+**Two 45° fields (2026-07-15, user-discovered):** at 3.0x FOV widening the real-race
+view flips UPSIDE DOWN — the race camera struct contains at least two 45.0f fields:
+the fovy AND a camera angle (pitch/elevation; 45°x3=135° tips past vertical). The
+attract demos showed no change that run (per-scene camera coverage varies).
+Isolation tooling added: every actively-re-read poke address is logged
+(`[FOV] live poke at 0x...`), and `WR64_POKE_FOV_ONLY=addr[,addr]` restricts pokes
+for one-variable-at-a-time runs. Current procedure: race at 3.0x → collect live
+addresses → single-address runs → the zoomed-but-upright one is fovy; the flipping
+one is the camera angle (a free camera-tilt knob for future enhancements).
+
 **Remaining for shipping border removal:** (1) bisect the FOV candidates with the
 visual margin test to isolate the live camera struct; (2) read the funcs_8 handler
 code around one inline-45.0 site to learn the camera struct layout (fovy offset →
