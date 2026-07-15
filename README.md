@@ -2,6 +2,14 @@
 
 A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://github.com/N64Recomp/N64Recomp) static recompilation.
 
+> **This fork** ([ramich/WaveRace64-Recomp](https://github.com/ramich/WaveRace64-Recomp), branch `windows-bringup`)
+> adds Windows build support and the port's **first working execution**: the game
+> boots, renders, responds to keyboard/controller input, and plays audio at the
+> correct pitch. See [docs/WINDOWS-BRINGUP.md](docs/WINDOWS-BRINGUP.md) for the full
+> bring-up report. Requires the companion
+> [ramich/N64ModernRuntime](https://github.com/ramich/N64ModernRuntime)
+> `overlay-dma-autoload` branch (wired via the submodule).
+
 ---
 
 ## Current Status
@@ -11,45 +19,53 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 | **Phase 1** | Environment Setup & Toolchain | **COMPLETE** |
 | **Phase 2** | Static Recompilation | **COMPLETE** |
 | **Phase 3** | Runtime Integration | **COMPLETE** |
-| **Phase 4** | Build & Link (RT64 + Runtime) | **COMPLETE** -- First successful build |
-| **Phase 5** | Audio & Input | Not Started |
-| **Phase 6** | Game-Specific Fixes | Not Started |
+| **Phase 4** | Build & Link (RT64 + Runtime) | **COMPLETE** |
+| **Phase 5** | Audio & Input | **COMPLETE** -- input verified by hand, audio via recompiled RSP microcode at 32 kHz |
+| **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode stable 2+ min; races being play-tested |
 | **Phase 7** | Enhancements | Not Started |
 | **Phase 8** | Release Preparation | Not Started |
 
-> **Not yet playable** -- First successful build achieved (11 MB ELF executable). Runtime boots but game-specific testing has not started.
+> **Playable (early).** The game boots, renders attract mode stably, menus respond to
+> keyboard/controller, and music/voices play correctly. Remaining crashes during
+> gameplay are missing indirect-call symbols, fixable in minutes with the included
+> tooling (see `scripts/`).
 
 ### Build Statistics
 
 | Metric | Value |
 |--------|-------|
-| **Executable** | `build/WaveRace64Recomp` (ELF, 11 MB) |
+| **Executable** | `build/WaveRace64Recomp` (Linux ELF) / `build\WaveRace64Recomp.exe` (Windows, ~8 MB) |
 | **Build system** | CMake + Ninja |
-| **Platform** | Linux x86_64 (Vulkan/SDL2) |
+| **Platforms** | Windows 11 x64 (clang-cl + MSVC environment, D3D12/Vulkan) -- verified; Linux x86_64 (Vulkan/SDL2) -- builds, unverified since Windows changes |
 | **Dependencies linked** | RT64, N64ModernRuntime (ultramodern), recompiled funcs |
-| **Link strategy** | `--start-group` / `--end-group` for circular dependencies |
+| **Link strategy** | `--start-group`/`--end-group` on GNU linkers; `/FORCE:MULTIPLE` on MSVC-style linkers |
 
-### Known Limitations (Phase 4)
+### Known Limitations
 
-- **Audio:** Stub implementations only -- no audio output yet
-- **Overlays:** `relocatable_sections_path` disabled (overlay sections lack relocation data)
+- **Overlay relocation data:** still absent, but no longer a blocker -- this game loads
+  each overlay at a fixed VRAM slot, and the runtime now tracks overlay residency
+  automatically via the PI DMA hook in N64ModernRuntime (`reload_overlays_on_dma`)
 - **Controller Pak:** Stub functions only (osPfs*)
-- **Runtime:** Game has not been launched/tested yet -- build compiles and links but gameplay is unverified
+- **Symbol map:** JAL-scan derived; indirect-call targets are still being discovered
+  during play-testing (automated fix loop: `scripts/bringup_loop.ps1`)
+- **No settings UI yet** (resolution/rebinding via code only)
 
 ### Recompilation Statistics
 
 | Metric | Value |
 |--------|-------|
-| **Functions recompiled** | 1,228 |
-| **Generated C source files** | 22 (`funcs_0.c` -- `funcs_21.c`) |
-| **Total output size** | ~19.5 MB |
-| **Header file** | `funcs.h` (65KB, all function declarations) |
-| **Overlay dispatch table** | `recomp_overlays.inl` (90KB) |
+| **Functions recompiled** | 1,281 |
+| **Generated C source files** | 23 (`funcs_0.c` -- `funcs_22.c`) |
+| **Audio RSP microcode** | recompiled from ROM `0x8DFB0` (`recomp/aspMain.us.rev1.toml` -> `rsp/aspMain.cpp`, generated) |
+| **Header file** | `funcs.h` (all function declarations) |
+| **Overlay dispatch table** | `recomp_overlays.inl` |
 | **Entry point** | `lookup.cpp` (ROM name + entrypoint) |
 
 Symbols were sourced from the [Wave Race 64 decomp project](https://github.com/WACOMalt/Wave-Race-64):
 - **756** base functions extracted from decomp symbol files
 - **1,228** functions after JAL-target auto-splitting
+- **1,281** functions after runtime-discovered indirect-call splits and ROM
+  pointer-table scanning (`scripts/find_indirect_targets.py`)
 
 ---
 
@@ -74,7 +90,12 @@ This project uses static recompilation to translate Wave Race 64's N64 MIPS bina
 - **Python** >= 3.10
 
 ### Platform-Specific
-- **Windows:** Windows 10 SDK, Visual Studio 2022 with C++ workload
+- **Windows:** Visual Studio 2022 (or Build Tools) with C++ workload,
+  **Windows SDK 10.0.26100 or newer** (RT64 needs `D3D12_HEAP_TYPE_GPU_UPLOAD`),
+  and LLVM/clang -- either the VS Clang component or a
+  [portable LLVM](https://github.com/llvm/llvm-project/releases) with `clang` on
+  `PATH` (RT64's shader pipeline invokes it). Full walkthrough:
+  [docs/WINDOWS-BRINGUP.md](docs/WINDOWS-BRINGUP.md)
 - **Linux:** Vulkan SDK >= 1.3, SDL2 development libraries
 
 ## Building
@@ -196,15 +217,23 @@ WaveRace64-Recomp/
 - [x] Used `--start-group`/`--end-group` for circular link dependencies
 - [x] Build produces 11 MB WaveRace64Recomp ELF executable
 
-### Phase 5: Audio & Input (NEXT)
-- [ ] SM64-derived HLE audio integration
-- [ ] SDL2 controller mapping (N64 -> modern gamepad)
-- [ ] EEPROM save -> file-based save redirect
+### Phase 5: Audio & Input (COMPLETE)
+- [x] Audio via statically recompiled RSP microcode (LLE, not SM64-derived HLE):
+      located in ROM by runtime OSTask instrumentation, recompiled with RSPRecomp,
+      16-entry command dispatch table (`recomp/aspMain.us.rev1.toml`)
+- [x] Audio output pacing fixes (frames-vs-samples unit bug; device reopen on
+      frequency change -- game runs at 32 kHz)
+- [x] SDL2 controller + keyboard mapping (N64 -> modern gamepad) -- verified in-game
+- [x] EEPROM save -> file-based save redirect (librecomp default; `saves/` created)
 
-### Phase 6: Game-Specific Fixes
-- [ ] Full gameplay testing (all modes, courses, riders)
+### Phase 6: Game-Specific Fixes (IN PROGRESS)
+- [x] Overlay residency tracking (automatic, via PI DMA hook in N64ModernRuntime --
+      see the `overlay-dma-autoload` submodule branch)
+- [x] Attract mode stable (2,342+ frames crash-free)
+- [x] Menu navigation verified with keyboard
+- [ ] Full gameplay testing (all modes, courses, riders) -- ongoing; use
+      `scripts/bringup_loop.ps1` to auto-fix missing-symbol crashes
 - [ ] Water rendering verification
-- [ ] Overlay transition testing
 
 ### Phases 7-8: Enhancements & Release
 - [ ] Widescreen, 60fps, HD texture support
@@ -217,6 +246,9 @@ WaveRace64-Recomp/
 | [`generate_symbols.py`](scripts/generate_symbols.py) | Extracts function symbols from the decomp project's linker scripts and converts them to N64Recomp TOML format |
 | [`auto_split_functions.py`](scripts/auto_split_functions.py) | Scans the ROM binary for JAL instructions to discover function boundaries not in the decomp symbol files (756 -> 1,228) |
 | [`find_missing_jal_targets.py`](scripts/find_missing_jal_targets.py) | Validates that all JAL call targets in the ROM are covered by symbol definitions |
+| [`find_indirect_targets.py`](scripts/find_indirect_targets.py) | Scans ROM data for function-pointer-table targets missed by JAL scanning; validates against `jr $ra` boundaries and filters switch jump tables. `--apply` for batch splits, `--split 0xADDR` for one crash address |
+| [`bringup_loop.ps1`](scripts/bringup_loop.ps1) | Unattended crash-driven loop: run the game, split the symbol at any "Failed to find function" address, regenerate, rebuild, repeat |
+| [`audio_ucode_loop.ps1`](scripts/audio_ucode_loop.ps1) | Same loop for the audio microcode's "Unhandled jump target" errors (note: those print to **stdout**) |
 
 ## Related Projects
 
