@@ -1837,7 +1837,49 @@ size = 0x5C
 [[section.functions]]
 name = "func_8009A460"
 vram = 0x8009A460
-size = 0x6C0
+size = 0xF4
+
+[[section.functions]]
+name = "func_8009A554"
+vram = 0x8009A554
+size = 0x158
+
+[[section.functions]]
+name = "func_8009A6AC"
+vram = 0x8009A6AC
+size = 0xFC
+
+[[section.functions]]
+name = "func_8009A7A8"
+vram = 0x8009A7A8
+size = 0x9C
+
+[[section.functions]]
+name = "func_8009A844"
+vram = 0x8009A844
+size = 0xB0
+
+[[section.functions]]
+name = "func_8009A8F4"
+vram = 0x8009A8F4
+size = 0x88
+
+# Split from func_8009A460: indirect-call target confirmed at runtime
+# ("Failed to find function at 0x8009A97C").
+[[section.functions]]
+name = "func_8009A97C"
+vram = 0x8009A97C
+size = 0x80
+
+[[section.functions]]
+name = "func_8009A9FC"
+vram = 0x8009A9FC
+size = 0x28
+
+[[section.functions]]
+name = "func_8009AA24"
+vram = 0x8009AA24
+size = 0xFC
 
 [[section.functions]]
 name = "func_8009AB20"
@@ -1847,12 +1889,67 @@ size = 0x130
 [[section.functions]]
 name = "func_8009AC50"
 vram = 0x8009AC50
-size = 0x158
+size = 0xC4
+
+[[section.functions]]
+name = "func_8009AD14"
+vram = 0x8009AD14
+size = 0x28
+
+[[section.functions]]
+name = "func_8009AD3C"
+vram = 0x8009AD3C
+size = 0x38
+
+[[section.functions]]
+name = "func_8009AD74"
+vram = 0x8009AD74
+size = 0x34
 
 [[section.functions]]
 name = "func_8009ADA8"
 vram = 0x8009ADA8
-size = 0x388
+size = 0xC4
+
+[[section.functions]]
+name = "func_8009AE6C"
+vram = 0x8009AE6C
+size = 0x28
+
+[[section.functions]]
+name = "func_8009AE94"
+vram = 0x8009AE94
+size = 0x80
+
+[[section.functions]]
+name = "func_8009AF14"
+vram = 0x8009AF14
+size = 0x50
+
+[[section.functions]]
+name = "func_8009AF64"
+vram = 0x8009AF64
+size = 0x3C
+
+[[section.functions]]
+name = "func_8009AFA0"
+vram = 0x8009AFA0
+size = 0x90
+
+[[section.functions]]
+name = "func_8009B030"
+vram = 0x8009B030
+size = 0x98
+
+[[section.functions]]
+name = "func_8009B0C8"
+vram = 0x8009B0C8
+size = 0x40
+
+[[section.functions]]
+name = "func_8009B108"
+vram = 0x8009B108
+size = 0x28
 
 [[section.functions]]
 name = "func_8009B130"
@@ -1867,17 +1964,172 @@ size = 0x24
 [[section.functions]]
 name = "func_8009B19C"
 vram = 0x8009B19C
-size = 0x4B4
+size = 0xB4
+
+[[section.functions]]
+name = "func_8009B250"
+vram = 0x8009B250
+size = 0x68
+
+[[section.functions]]
+name = "func_8009B2B8"
+vram = 0x8009B2B8
+size = 0x84
+
+[[section.functions]]
+name = "func_8009B33C"
+vram = 0x8009B33C
+size = 0xB8
+
+[[section.functions]]
+name = "func_8009B3F4"
+vram = 0x8009B3F4
+size = 0xB8
+
+[[section.functions]]
+name = "func_8009B4AC"
+vram = 0x8009B4AC
+size = 0x84
+
+[[section.functions]]
+name = "func_8009B530"
+vram = 0x8009B530
+size = 0x4C
+
+[[section.functions]]
+name = "func_8009B57C"
+vram = 0x8009B57C
+size = 0xD4
 
 [[section.functions]]
 name = "func_8009B650"
 vram = 0x8009B650
-size = 0x7F0
+size = 0x1D4
+
+[[section.functions]]
+name = "func_8009B824"
+vram = 0x8009B824
+size = 0x78
+
+[[section.functions]]
+name = "func_8009B89C"
+vram = 0x8009B89C
+size = 0x74
+
+[[section.functions]]
+name = "func_8009B910"
+vram = 0x8009B910
+size = 0x104
+
+[[section.functions]]
+name = "func_8009BA14"
+vram = 0x8009BA14
+size = 0xCC
+
+[[section.functions]]
+name = "func_8009BAE0"
+vram = 0x8009BAE0
+size = 0xB8
+
+[[section.functions]]
+name = "func_8009BB98"
+vram = 0x8009BB98
+size = 0x10C
+
+[[section.functions]]
+name = "func_8009BCA4"
+vram = 0x8009BCA4
+size = 0x19C
 
 [[section.functions]]
 name = "func_8009BE40"
 vram = 0x8009BE40
-size = 0x400
+size = 0x7C
+
+[[section.functions]]
+name = "func_8009BEBC"
+vram = 0x8009BEBC
+size = 0x30
+
+[[section.functions]]
+name = "func_8009BEEC"
+vram = 0x8009BEEC
+size = 0x30
+
+[[section.functions]]
+name = "func_8009BF1C"
+vram = 0x8009BF1C
+size = 0x30
+
+[[section.functions]]
+name = "func_8009BF4C"
+vram = 0x8009BF4C
+size = 0x30
+
+[[section.functions]]
+name = "func_8009BF7C"
+vram = 0x8009BF7C
+size = 0x30
+
+[[section.functions]]
+name = "func_8009BFAC"
+vram = 0x8009BFAC
+size = 0x30
+
+[[section.functions]]
+name = "func_8009BFDC"
+vram = 0x8009BFDC
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C00C"
+vram = 0x8009C00C
+size = 0x38
+
+[[section.functions]]
+name = "func_8009C044"
+vram = 0x8009C044
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C074"
+vram = 0x8009C074
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C0A4"
+vram = 0x8009C0A4
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C0D4"
+vram = 0x8009C0D4
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C104"
+vram = 0x8009C104
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C134"
+vram = 0x8009C134
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C164"
+vram = 0x8009C164
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C194"
+vram = 0x8009C194
+size = 0x30
+
+[[section.functions]]
+name = "func_8009C1C4"
+vram = 0x8009C1C4
+size = 0x7C
 
 [[section.functions]]
 name = "func_8009C240"
