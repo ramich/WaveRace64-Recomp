@@ -34,3 +34,11 @@ baserom*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Generated from the ROM by RSPRecomp - ROM-derived, never commit
+rsp/
+
+# Session logs and runtime output
+*.log
+saves/
+waverace64.z64
