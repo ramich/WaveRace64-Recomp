@@ -305,10 +305,14 @@ public:
     void update_screen() override {
         if (app_) {
             // Diagnostics: WR64_FB_DUMP=1 dumps the 320x240 framebuffer to
-            // fb_dump.bin (RGBA5551 LE) ~10s in, for offline analysis with
-            // scripts/measure_borders.py.
+            // fb_dump.bin / fb_dump2.bin / fb_dump3.bin at ~10s/~30s/~50s, for
+            // offline analysis with scripts/measure_borders.py.
             static uint32_t update_count = 0;
-            if (++update_count == 600) {
+            ++update_count;
+            if ((update_count % 300) == 0) {
+                fprintf(stderr, "[WR64] update_screen count=%u\n", update_count);
+            }
+            if (update_count == 600 || update_count == 1800 || update_count == 3000) {
                 const char* dump_env = std::getenv("WR64_FB_DUMP");
                 if (dump_env && dump_env[0] == '1') {
                     uint8_t* rdram = app_->core.RDRAM;
@@ -317,7 +321,9 @@ public:
                     };
                     auto* vi_regs = ultramodern::renderer::get_vi_regs();
                     uint32_t fb_guest = 0x80000000u | (vi_regs->VI_ORIGIN_REG & 0x3FFFFFu);
-                    FILE* fb = fopen("fb_dump.bin", "wb");
+                    const char* name = (update_count == 600) ? "fb_dump.bin"
+                                     : (update_count == 1800) ? "fb_dump2.bin" : "fb_dump3.bin";
+                    FILE* fb = fopen(name, "wb");
                     if (fb) {
                         for (uint32_t i = 0; i < 320u * 240u; i++) {
                             uint16_t px = rd16(fb_guest + i * 2);
