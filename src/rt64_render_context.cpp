@@ -59,6 +59,11 @@ static void dummy_check_interrupts() {}
 
 // Live application pointer for event forwarding (single renderer instance).
 static std::atomic<RT64::Application*> s_app{nullptr};
+// Whether developer tooling is enabled; gates ALL RT64 debug shortcuts.
+// (RT64 itself only gates F1/Inspector — F2/F3/F4 toggle ray tracing, the raw
+// RDRAM framebuffer view, and texture replacements even in normal play, which
+// surprises players. We only forward events when dev mode is on.)
+static std::atomic<bool> s_dev_mode{false};
 // Game frames (display lists) submitted since last consumption, for FPS display.
 static std::atomic<uint32_t> s_frame_count{0};
 
@@ -300,6 +305,7 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
     if (dev_env && dev_env[0] == '1') {
         developer_mode = true;
     }
+    s_dev_mode.store(developer_mode);
 
     auto ctx = std::make_unique<RT64Context>(rdram, window_handle, developer_mode);
     if (!ctx->valid()) {
@@ -311,6 +317,9 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
 }
 
 bool rt64_handle_sdl_event(void* sdl_event) {
+    if (!s_dev_mode.load()) {
+        return false;
+    }
     RT64::Application* app = s_app.load();
     if (app == nullptr || sdl_event == nullptr) {
         return false;
