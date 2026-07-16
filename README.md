@@ -12,6 +12,23 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 
 ---
 
+## AI-Assisted Development
+
+**This fork** — its Windows bring-up, the overlay-loading mechanism, audio/input
+wiring, widescreen and per-scene aspect presentation, and the border/culling
+reverse-engineering work — was developed primarily through AI-assisted development
+(Claude), working iteratively with a human collaborator who supplied hardware
+access, visual/audio verification, and judgment calls. This does not describe the
+upstream [WACOMalt/WaveRace64-Recomp](https://github.com/WACOMalt/WaveRace64-Recomp)
+project, only the changes on this fork's branches. Sessions relied on runtime
+instrumentation, automated crash-fix loops, and (later) a scripted input driver for
+autonomous UI testing, alongside standard human play-testing and screenshot/log
+review. See [docs/RE-NOTES.md](docs/RE-NOTES.md) and
+[docs/WINDOWS-BRINGUP.md](docs/WINDOWS-BRINGUP.md) for the technical trail this
+process left behind.
+
+---
+
 ## Current Status
 
 | Phase | Description | Status |
