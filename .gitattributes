@@ -1,0 +1,4 @@
+# cmd/batch files MUST be CRLF: cmd.exe silently misparses LF-only batch
+# files (see docs/RE-NOTES.md build-trap post-mortem, 2026-07-16).
+*.cmd text eol=crlf
+*.bat text eol=crlf
