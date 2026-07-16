@@ -49,9 +49,9 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 - **Symbol map:** JAL-scan derived; indirect-call targets are still being discovered
   during play-testing (automated fix loop: `scripts/bringup_loop.ps1`)
 - **No settings UI yet** (settings via environment variables, see below)
-- **Widescreen rough edges** (needs game patches): the HUD stretches with the window
-  instead of staying at its original aspect, and objects can pop in at the screen
-  edges because the game culls against the 4:3 frustum
+- **Widescreen rough edges** (needs game patches): objects can pop in at the screen
+  edges because the game culls against the 4:3 frustum. HUD/menu handling is solved
+  (see `WR64_BORDERS=0` and the per-scene presentation below)
 - **Black borders** around the game image: drawn by the game inside its framebuffer
   (CRT overscan compensation). Scissor-rewrite removal exists (`WR64_BORDERS=0`,
   experimental) but the revealed margins are half-rendered. Root cause now mostly
@@ -65,7 +65,9 @@ A native PC port of **Wave Race 64** (USA Rev 1) using [N64Recomp](https://githu
 | Setting | Effect |
 |---------|--------|
 | `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
-| `WR64_BORDERS=0` | Border removal via scissor rewrite — **also fixes the stretched HUD in widescreen** (the rewritten 4:3 scissor re-enables RT64's aspect compensation for HUD elements). Margins are still only partially rendered (culling/wave-grid, see RE-NOTES); default remains original borders |
+| `WR64_BORDERS=0` | Border removal via scissor rewrite — **also fixes the stretched HUD in widescreen** (the rewritten 4:3 scissor re-enables RT64's aspect compensation for HUD elements) and **enables per-scene presentation**: 2D menus (watercraft select) present as centered 4:3 with black pillars, everything with a live 3D world stays widescreen. Margins are still only partially rendered (culling/wave-grid, see RE-NOTES); default remains original borders |
+| `WR64_SCENE_ASPECT=0` | Disable the per-scene 4:3 menu presentation (keep everything widescreen). Only relevant with `WR64_BORDERS=0` |
+| `WR64_SCENE_DEBUG=1` | Log the scene classifier (`[SCENE] world= menuworld= ... -> wide/menu`) |
 | `WR64_WINDOW=WxH` | Startup window size override (e.g. `1600x900`) |
 | `WR64_HUD=stretch` | Stretch all 2D (HUD and menus) with the window in widescreen instead of keeping it proportional/centered (default: centered; the centered mode requires `WR64_BORDERS=0` for RT64's compensation to engage). A third mode — proportional elements anchored to the window edges — needs per-element extended-GBI tagging (future game patches) |
 | `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
@@ -294,7 +296,10 @@ WaveRace64-Recomp/
 - [ ] Water rendering verification
 
 ### Phases 7-8: Enhancements & Release
-- [ ] Widescreen, 60fps, HD texture support
+- [x] Widescreen (3D expand; per-scene presentation keeps 2D menus at 4:3)
+- [x] High-FPS presentation (`WR64_HIGHFPS=1`, interpolated; clouds stutter known)
+- [ ] Border removal endgame (culling frustum + wave-grid, see `docs/RE-NOTES.md`)
+- [ ] HD texture support
 - [ ] Release packaging
 
 ## Tools
@@ -307,6 +312,7 @@ WaveRace64-Recomp/
 | [`find_indirect_targets.py`](scripts/find_indirect_targets.py) | Scans ROM data for function-pointer-table targets missed by JAL scanning; validates against `jr $ra` boundaries and filters switch jump tables. `--apply` for batch splits, `--split 0xADDR` for one crash address |
 | [`bringup_loop.ps1`](scripts/bringup_loop.ps1) | Unattended crash-driven loop: run the game, split the symbol at any "Failed to find function" address, regenerate, rebuild, repeat |
 | [`audio_ucode_loop.ps1`](scripts/audio_ucode_loop.ps1) | Same loop for the audio microcode's "Unhandled jump target" errors (note: those print to **stdout**) |
+| [`drive_to_menu.ps1`](scripts/drive_to_menu.ps1) | Autonomous UI test driver: boots the game, navigates title → watercraft select with synthesized scancode keyboard input, saves per-step screenshots and stderr telemetry to `drive_out/`. Combine with `WR64_WINDOW=1920x800` to reproduce ultrawide layout bugs without manual testing |
 
 ## Related Projects
 

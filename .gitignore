@@ -51,3 +51,6 @@ patches/*.bin
 patches/*.map
 patches/syms.ld
 RecompiledPatches/
+
+# AI session context - local only
+CLAUDE.md

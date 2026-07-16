@@ -193,6 +193,12 @@ the save subsystem also engaged.
 
 ## 3. Current state
 
+> **Historical snapshot (first bring-up day).** Everything below described the
+> state before overlays, audio, input, widescreen, high-FPS, and the per-scene
+> menu presentation landed. For the current state see `README.md` (status,
+> env vars, tools) and `docs/RE-NOTES.md` (camera model, borders/culling,
+> scene classification). This section is kept as the bring-up chronicle.
+
 **Working (verified by execution):** runtime init, ROM hash validation, thread startup,
 RSP microcode hookup, recompiled game code execution, display list submission to RT64,
 save path creation. The Windows build itself is fully repeatable.

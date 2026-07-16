@@ -186,6 +186,74 @@ With our scissor rewrite active (WR64_BORDERS=0 → scissor 0,0-320,240 = ratio
 window captures at 1600x900 (hud_stretched.png vs hud_fixed.png — the WAVE RACE
 logo oval). The border fix and the HUD fix are the same switch.
 
+## Per-scene presentation — SOLVED (2026-07-16)
+
+Goal: pure-2D menus (watercraft select) present as centered 4:3; everything
+with a live 3D world (title flyby, demos, difficulty select over attract,
+races) stays widescreen. Committed as superproject dcf7b42 + lib/rt64 2c1630c.
+
+### Scene classification (what finally worked, and what didn't)
+
+Signal = RSP-side counters in `lib/rt64` `rt64_rsp.cpp addCurrentProjection`
+counting **segment-3 perspective projections that geometry actually draws
+under**, split by camera:
+
+- Live-world cams: races 45° (`m11=2.414215`), demo/flyby 75° (`1.301849`),
+  transitions 50°-ish variants at phys `0x0012D8F0`.
+- **The 2D menus render a parked 3D world every frame** (invisible on real
+  hardware, revealed by Expand) under a **dedicated fovy=50° camera —
+  `m11=2.148331`**, bit-stable guPerspective output, at its own matrix buffer
+  (phys `0x001468D8`). That constant is the menu fingerprint.
+
+Dead ends, for the record (each failed on real user runs):
+1. Tint-texrect presence → flybys misclassified.
+2. Texrect counts → difficulty select (many texrects, needs wide) is
+   inseparable from watercraft select.
+3. Linear DL scans for seg-3 `G_MTX` → false positives from **stale content in
+   the double-buffered DL tail** (the walk ignores `G_DL` branch-variant
+   termination and control flow generally) — even with branch termination,
+   menus genuinely *load* the world matrix without drawing under it. Only
+   "drawn under", counted inside the RSP, is reliable.
+
+Smoothing: Schmitt trigger, ±15/frame with engage 60 / release 30 (~0.2 s),
+moved ONLY by positive evidence (world draw vs menu-world draw); blank/fade
+frames hold state so loading fades can't flip the aspect.
+
+### Presentation (how 4:3 is applied crash-free)
+
+**Never flip RT64 `UserConfiguration::AspectRatio` at runtime.** The aspect
+drives render-target widths:
+- `updateUserConfig(true)` (framebuffer discard) → destroyAll races the
+  in-flight workload/present queues → crashes (Event Log: AV inside
+  `VCRUNTIME140!memcpy`, plus jumps through corrupted pointers). Reference
+  ports (Zelda64Recomp) only ever call this on explicit settings-menu clicks.
+- `updateUserConfig(false)` → old wide targets survive → misaligned stale
+  ghosting behind the menu.
+
+Instead, rendering stays Expand permanently and the **final VI blit is
+scissored to a centered 4:3 rect** (`rt64_wr64_set_present_crop43`,
+`rt64_vi_renderer.cpp`); the swapchain is cleared before the blit, so the
+pillars are true black. Instant, no resource churn, nothing to race.
+
+Two rendering fixes make the cropped frame pixel-identical to a real 4:3
+frame (`rt64_framebuffer_renderer.cpp`, both gated on the crop flag):
+1. Force the fbPair aspect compensation on (`adjustRatio`) — fbPairs with
+   odd scissor ratios otherwise skip it and content lands wide-spread.
+2. Disable the wide-viewport heuristic: the menu draws each craft preview
+   through a **framebuffer-spanning viewport scissored to its box**; the
+   heuristic reads that as fullscreen world content and applies the
+   widescreen spread. (This is also what the mysterious "floating jetskis in
+   the menu margins" were.) The rider preview always took the non-wide
+   squeezed path — which is why it was always positioned correctly.
+
+### Verification tooling
+
+`scripts/drive_to_menu.ps1` boots the game and navigates to the watercraft
+menu with synthesized keyboard input (keybd_event **with real scancodes** —
+SDL ignores VK-only events), capturing per-step screenshots + stderr.
+`WR64_WINDOW=1920x800` reproduces ultrawide layouts on any screen. The final
+fix was found and verified end-to-end this way, no manual testing.
+
 ## Emulator prior art
 
 - GLideN64 "Crop" feature: crops in-framebuffer borders (Wave Race's type) but
