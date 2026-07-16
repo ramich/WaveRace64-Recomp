@@ -98,7 +98,7 @@ WR64_DEV=1 ./build/WaveRace64Recomp
 | Key | Tool |
 |-----|------|
 | **F1** | RT64 Inspector (ImGui): render statistics/profiling, framebuffer views, user & enhancement configuration editors (resolution, aspect, MSAA, filtering -- applied live) |
-| **F2** | Toggle ray tracing (experimental RT64 feature) |
+| **F2** | Toggle ray tracing — **non-functional in current RT64**: the shortcut flips the flag, but every consumer sits behind `#if RT_ENABLED`, which no build defines, and the RT shader pipeline was never ported into the modern RT64 rewrite (it's a leftover from the original SM64RT-era path tracer). No GPU will show a difference |
 | **F3** | Toggle raw-RDRAM framebuffer view (shows the game's original 320x240 output; brief artifacts when toggling back are a known RT64 quirk) |
 | **F4** | Toggle texture replacements |
 
