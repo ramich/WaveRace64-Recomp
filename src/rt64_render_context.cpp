@@ -31,6 +31,15 @@
 
 #include "hle/rt64_application.h"
 
+// Exported by lib/rt64 rt64_rsp.cpp (WR64 patch): segment-3 projections that
+// geometry was actually drawn under, split into live-world cameras vs the
+// menus' parked-world fovy=50 camera — drives the scene classifier in send_dl.
+extern "C" uint32_t rt64_wr64_world_proj_loads();
+extern "C" uint32_t rt64_wr64_menu_world_proj_loads();
+// Exported by lib/rt64 rt64_vi_renderer.cpp (WR64 patch): pillarbox the final
+// present blit to 4:3. Aspect config stays Expand permanently.
+extern "C" void rt64_wr64_set_present_crop43(int enabled);
+
 // ---------------------------------------------------------------------------
 // Static dummy buffers required by RT64 (must persist for the lifetime of app)
 // ---------------------------------------------------------------------------
@@ -488,11 +497,120 @@ public:
             static const char* borders_env = std::getenv("WR64_BORDERS");
             if (borders_env && borders_env[0] == '0') {
                 uint8_t* rdram = app_->core.RDRAM;
+
+                // Pass 1: gameplay detection. Gameplay frames draw the
+                // fullscreen tint texrect (0xE44D8368); menus don't. Menu
+                // frames keep their original scissor so 3D props the game
+                // parks off-screen stay clipped (RT64's relaxed similarity
+                // check keeps menu 2D centered without the rewrite).
+                // Scene classification (drives the scissor rewrite and the
+                // per-scene aspect): gameplay and cinematic flybys get the
+                // widescreen treatment, menus stay 4:3. Signals, measured from
+                // real DLs: gameplay draws the fullscreen tint texrect
+                // (0xE44D8368); cinematic flybys draw no tint and at most a
+                // couple of texrects (the logo); menus draw no tint but a
+                // stack of panel texrects.
+                // Scene signals, measured from real DLs:
+                // - The game's WORLD projection always loads via segment 3
+                //   (G_MTX w1 = 0x03xxxxxx). Races, demos, flybys, and menus
+                //   with live world backdrops (e.g. difficulty select) all
+                //   carry it; pure 2D menus (watercraft select) draw their
+                //   parked world under a dedicated fovy=50 camera instead.
+                // - The fullscreen tint texrect (0xE44D8368) marks racing
+                //   frames (used by the widening rewrite below).
+                bool has_tint = false;
+                {
+                    uint32_t scan = dl_start_phys;
+                    for (int i = 0; i < 0x4000 && scan < 0x7FFFF8u; i++, scan += 8) {
+                        uint32_t w0s = *(uint32_t*)(rdram + scan);
+                        uint8_t ops = w0s >> 24;
+                        if (ops == 0xB8) break; // G_ENDDL
+                        if (ops == 0x06 && ((w0s >> 16) & 0xFF) == 0x01) break; // G_DL branch
+                        if (ops == 0xE4 && w0s == 0xE44D8368u) has_tint = true;
+                    }
+                }
+                // World detection comes from RT64's RSP itself: counters of
+                // segment-3 projections geometry was actually drawn under.
+                // Raw DL scans false-positived on stale/branched-over buffer
+                // content, and even real seg-3 *loads* happen in menus — the
+                // menus also render a parked world (the prop jetskis) behind
+                // their backdrop, but under a dedicated fovy=50 camera which
+                // the RSP patch counts separately as "menu world". Live
+                // cameras (races 45, demos 75, ...) count as world. Counters
+                // cover tasks processed up to the previous send_dl — one task
+                // of latency, absorbed by the Schmitt trigger below.
+                bool has_world_proj = false;
+                bool has_menu_world = false;
+                {
+                    static uint32_t last_world_loads = 0;
+                    static uint32_t last_menu_world_loads = 0;
+                    const uint32_t world_loads = rt64_wr64_world_proj_loads();
+                    const uint32_t menu_world_loads = rt64_wr64_menu_world_proj_loads();
+                    has_world_proj = (world_loads != last_world_loads);
+                    has_menu_world = (menu_world_loads != last_menu_world_loads);
+                    last_world_loads = world_loads;
+                    last_menu_world_loads = menu_world_loads;
+                }
+                // Schmitt-trigger smoothing. Only positive evidence moves the
+                // score: a drawn live-world camera pushes toward wide, a drawn
+                // menu-world camera pushes toward menu, and blank/fade frames
+                // (neither) hold the current state instead of drifting —
+                // loading fades must not flip the aspect.
+                static int menu_score = 0;
+                if (has_world_proj) {
+                    menu_score -= 15;
+                }
+                else if (has_menu_world) {
+                    menu_score += 15;
+                }
+                if (menu_score < 0) menu_score = 0;
+                if (menu_score > 120) menu_score = 120;
+                static bool menu_state = false;
+                if (!menu_state && menu_score >= 60) menu_state = true;
+                if (menu_state && menu_score <= 30) menu_state = false;
+                const bool is_gameplay = !menu_state;
+                static const char* dbg_env = std::getenv("WR64_SCENE_DEBUG");
+                if (dbg_env && dbg_env[0] == '1') {
+                    static uint32_t dbg_frames = 0;
+                    if ((++dbg_frames % 20) == 0) {
+                        fprintf(stderr, "[SCENE] world=%d menuworld=%d tint=%d score=%d -> %s\n",
+                            (int)has_world_proj, (int)has_menu_world, (int)has_tint,
+                            menu_score, is_gameplay ? "wide" : "menu");
+                    }
+                }
+
+                // Menus manage only the original 4:3 region (parked 3D props
+                // and un-cleared framebuffer areas sit outside it), so
+                // widescreen expansion must not apply to them: switch RT64's
+                // aspect mode per scene type. Gameplay gets Expand (unless
+                // WR64_WIDESCREEN=0), menus get Original (pillarboxed).
+                {
+                    static const char* ws_env2 = std::getenv("WR64_WIDESCREEN");
+                    static const char* sa_env = std::getenv("WR64_SCENE_ASPECT");
+                    const bool widescreen_enabled = !(ws_env2 && ws_env2[0] == '0');
+                    const bool scene_aspect_enabled = !(sa_env && sa_env[0] == '0');
+                    static int last_requested = -1; // -1 unknown, 0 menu, 1 gameplay
+                    const int wanted = is_gameplay ? 1 : 0;
+                    if (widescreen_enabled && scene_aspect_enabled && wanted != last_requested) {
+                        last_requested = wanted;
+                        // Presentation-level pillarbox: rendering stays wide
+                        // (Expand) at all times; only the final blit's scissor
+                        // changes. Runtime UserConfiguration flips are not
+                        // viable — with the framebuffer discard they crash the
+                        // in-flight queues, without it the differently-sized
+                        // stale targets ghost through the menu.
+                        rt64_wr64_set_present_crop43(wanted == 0 ? 1 : 0);
+                    }
+                }
+
                 uint32_t addr = dl_start_phys;
-                for (int i = 0; i < 0x4000; i++, addr += 8) {
+                for (int i = 0; is_gameplay && i < 0x4000 && addr < 0x7FFFF8u; i++, addr += 8) {
                     uint32_t w0 = *(uint32_t*)(rdram + addr);
                     uint8_t op = w0 >> 24;
                     if (op == 0xB8) { // G_ENDDL (F3DEX)
+                        break;
+                    }
+                    if (op == 0x06 && ((w0 >> 16) & 0xFF) == 0x01) { // G_DL branch: logical end
                         break;
                     }
                     if (op == 0x01) { // G_MTX (F3DEX): params in w0 bits 16-23
