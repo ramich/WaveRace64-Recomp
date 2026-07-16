@@ -94,7 +94,29 @@ for 45.0f/75.0f floats with periodic rescan since camera structs spawn per scene
   — unreachable by memory pokes, patchable only as instructions. Same number, two
   homes: one in data (projection), one in instructions (culling). ✔/✘
 
-  **Endgame procedure:** instruction-patch the 8 inline sites in small groups
+  **Site classification (2026-07-15, scripts/classify_fov_sites.py — one site
+  patched to 66.5° per run, verdict via RT64-PROJ m11 telemetry):**
+
+  | handler | vram | projection mover |
+  |---|---|---|
+  | func_8009B910 | 0x8009B93C | **YES** |
+  | func_8009BA14 | 0x8009BA40 | no (camera not active in window, or non-projection) |
+  | func_8009BAE0 | 0x8009BB0C | no (same caveat) |
+  | func_8009BB98 | 0x8009BBC4 | **YES** |
+  | func_8009BCA4 | 0x8009BCD0 | **YES** |
+
+  Culling hypotheses eliminated since: precomputed half-angle trig constants
+  (tan/cos/sin of 22.5° — zero inline hits); the 0x43C1 "focal" hit at 0x80082A68
+  is a plain 386.0 threshold compare (ambiguous, inside 0x22F4-byte func_80081CC8).
+  Also present: an army of ~18 stride-0x30 `$a3` inline-45.0 setters at
+  0x8009BED8..0x8009C1B0 (per-course cameras?) — unclassified.
+
+  **Pragmatic shipping test (pending user verdict):** the three confirmed movers
+  patched to 47.75° (lui 0x423F) — at +6%, the unwidened-culling edge strip may be
+  visually negligible; if so, this + the scissor rewrite ships border removal
+  without solving culling at all.
+
+  **Endgame procedure (if pop-in is visible):** instruction-patch the 8 inline sites in small groups
   (via [[patches.instruction]] in waverace64.toml; 45.0f → ~47.7f needs
   lui 0x423E + ori pairing or lui 0x423F = 47.75 single-instruction) and classify
   each: moves projection (watch RT64-PROJ m11 telemetry), moves culling (buoys in
