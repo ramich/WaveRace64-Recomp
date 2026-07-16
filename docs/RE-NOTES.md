@@ -111,10 +111,20 @@ for 45.0f/75.0f floats with periodic rescan since camera structs spawn per scene
   Also present: an army of ~18 stride-0x30 `$a3` inline-45.0 setters at
   0x8009BED8..0x8009C1B0 (per-course cameras?) — unclassified.
 
-  **Pragmatic shipping test (pending user verdict):** the three confirmed movers
-  patched to 47.75° (lui 0x423F) — at +6%, the unwidened-culling edge strip may be
-  visually negligible; if so, this + the scissor rewrite ships border removal
-  without solving culling at all.
+  **47.75° instruction patches: VALIDATED (2026-07-15).** With all 49 inline-45.0f
+  sites patched (scripts/gen_fov_patches.py generates the TOML block), RT64
+  telemetry shows m11=2.255966 = 47.75° live — the recompiler patch mechanism
+  provably moves the projection. User perception at +6% is (correctly) nil; one
+  user screenshot (Dolphin Park) shows real scene geometry continuing into the
+  margins. Remaining engineering for full border removal:
+  1. A 45° source still appears in telemetry alongside 2.256 — some cameras get
+     fovy from a data table or differently-encoded constant. Find it.
+  2. The margin TINT: a fullscreen overlay pass (atmosphere/glare) is drawn only
+     over the inner rect — margins show untinted scene (clearly visible seam in
+     the user's screenshot). Widen that overlay's 2D quad.
+  3. The wave-mesh detail region (unchanged).
+  4. Bisect the 49 sites down to camera-only before shipping (some 45s are
+     likely physics/angle constants; no misbehavior observed in play-testing yet).
 
   **Endgame procedure (if pop-in is visible):** instruction-patch the 8 inline sites in small groups
   (via [[patches.instruction]] in waverace64.toml; 45.0f → ~47.7f needs
