@@ -529,6 +529,18 @@ public:
                             }
                         }
                     }
+                    // The game draws a fullscreen tint/atmosphere texrect sized
+                    // to the inner view rect (9,21)-(310,218) every frame —
+                    // the source of the color seam when borders are removed.
+                    // Widen it to cover the full framebuffer.
+                    if (op == 0xE4) {
+                        uint32_t w1 = *(uint32_t*)(rdram + addr + 4);
+                        if (w0 == 0xE44D8368u && (w1 & 0x00FFFFFFu) == 0x00024054u) {
+                            // (9,21)-(310,218) -> (0,0)-(319,239), keep tile bits.
+                            *(uint32_t*)(rdram + addr) = 0xE44FC3BCu;
+                            *(uint32_t*)(rdram + addr + 4) = w1 & 0xFF000000u;
+                        }
+                    }
                     if (op == 0xED) { // G_SETSCISSOR, coords are 10.2 fixed
                         uint32_t w1 = *(uint32_t*)(rdram + addr + 4);
                         uint32_t x0 = (w0 >> 12) & 0xFFF, y0 = w0 & 0xFFF;
