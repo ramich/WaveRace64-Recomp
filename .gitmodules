@@ -3,7 +3,7 @@
 	url = https://github.com/N64Recomp/N64Recomp.git
 [submodule "lib/rt64"]
 	path = lib/rt64
-	url = https://github.com/rt64/rt64.git
+	url = https://github.com/ramich/rt64.git
 [submodule "lib/N64ModernRuntime"]
 	path = lib/N64ModernRuntime
 	url = https://github.com/ramich/N64ModernRuntime.git
