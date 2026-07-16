@@ -728,6 +728,15 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
     ultramodern::renderer::WindowHandle window_handle,
     bool developer_mode
 ) {
+    // WR64_HUD=stretch|centered: HUD aspect under widescreen expansion.
+    // "centered" (default) keeps HUD elements proportional (RT64 AUTO);
+    // "stretch" anchors them to the window edges by stretching with the frame.
+    // Translated to RT64's rect-aspect default before the first frame.
+    const char* hud_env = std::getenv("WR64_HUD");
+    if (hud_env && strcmp(hud_env, "stretch") == 0) {
+        _putenv_s("RT64_RECT_ASPECT_DEFAULT", "stretch");
+    }
+
     // WR64_DEV=1 enables RT64's developer inspector (toggle in-game with F1).
     const char* dev_env = std::getenv("WR64_DEV");
     if (dev_env && dev_env[0] == '1') {
