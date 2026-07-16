@@ -161,7 +161,15 @@ static ultramodern::renderer::WindowHandle create_window(void* /*gfx_data*/) {
     // Size the window to fit the display's usable area (fixed 1280x960 is
     // taller than many laptop screens once DPI scaling and the taskbar are
     // accounted for, leaving the title bar off-screen).
+    // WR64_WINDOW=WxH overrides (e.g. 1600x900 for widescreen testing).
     int win_w = 1280, win_h = 960;
+    if (const char* win_env = SDL_getenv("WR64_WINDOW")) {
+        int w = 0, h = 0;
+        if (SDL_sscanf(win_env, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 240) {
+            win_w = w;
+            win_h = h;
+        }
+    }
     SDL_Rect usable{};
     if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && usable.w > 0 && usable.h > 0) {
         int max_h = (int)(usable.h * 0.90f);

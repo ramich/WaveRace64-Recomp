@@ -39,15 +39,16 @@ NTSC-U widescreen code patches their high halfwords to 0x3FE3 (1.7777 = 16:9):
 - Recomp-native path: RT64 transform interpolation at display refresh rate
   (`WR64_HIGHFPS=1`, experimental) — the Zelda64Recomp approach, no logic change.
   **User-verified working** (2026-07-15): motion is smooth at display rate.
-- **Known artifact: stuttering clouds.** RT64 interpolates by matching transforms
-  across consecutive game frames; the sky clouds are (very likely) billboards whose
-  vertex data is regenerated in world space every game frame — no stable matrix to
-  match, so they snap at 20 Hz while everything else glides. Zelda64Recomp solved
-  this class of problem with extended-GBI tagging patches (marking draws with
-  stable interpolation IDs). Fix path here: find the cloud/sky draw function
-  (probably near the skybox rendering; search DL for the cloud texture loads) and
-  either tag it via extended GBI or make RT64 skip-interpolate it. Requires the
-  patches pipeline (available) + RE of the sky renderer (not started).
+- **Known artifact: stuttering clouds — CONFIRMED STRUCTURAL (2026-07-15).**
+  RT64 interpolates by matching *transforms* (worldTransforms + RigidBody lerp,
+  rt64_game_frame.cpp). Billboard clouds regenerate their vertex data per game
+  frame under a static transform, and RT64's vertex-level velocity interpolation
+  is an unimplemented TODO (rt64_game_frame.cpp ~1012: "TODO: Compute the velocity
+  buffer"). No config or tagging fixes this today. Real fix routes, both major:
+  (a) implement vertex-velocity interpolation in RT64 (upstream contribution that
+  would benefit every recomp), or (b) game-patch the cloud renderer to draw
+  matrix-transformed quads instead of world-space billboards (requires finding the
+  sky renderer). Parked as a documented limitation of WR64_HIGHFPS.
 - True logic-rate change would need the physics timestep and frame counters
   found and patched — major RE effort.
 
@@ -172,6 +173,18 @@ projection source and likely feeds culling and the wave grid too.
 - HUD elements stretch in widescreen (user-observed). The HUD is drawn in 2D ortho
   coordinates; keeping it 4:3 needs either RT64 extended-GBI tagging or game
   patches to reposition. Not started.
+
+## HUD — SOLVED (2026-07-15), same fix as borders
+
+Root cause of the widescreen HUD stretch: RT64 auto-compensates texrect (HUD)
+aspect under Expand, but only when the framebuffer scissor ratio is within 10% of
+the VI aspect (rt64_framebuffer_renderer.cpp ~1436, `SimilarityPercentage`). Wave
+Race's odd game scissor (8,20)-(310,218) has ratio 1.525 vs source 1.333 — fails
+the check — so RT64 disables compensation and the HUD stretches with the window.
+With our scissor rewrite active (WR64_BORDERS=0 → scissor 0,0-320,240 = ratio
+1.333) the check passes and the HUD keeps correct proportions. Verified by A/B
+window captures at 1600x900 (hud_stretched.png vs hud_fixed.png — the WAVE RACE
+logo oval). The border fix and the HUD fix are the same switch.
 
 ## Emulator prior art
 
