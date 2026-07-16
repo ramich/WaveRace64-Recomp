@@ -733,9 +733,14 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
     // "stretch" anchors them to the window edges by stretching with the frame.
     // Translated to RT64's rect-aspect default before the first frame.
     const char* hud_env = std::getenv("WR64_HUD");
-    if (hud_env && strcmp(hud_env, "stretch") == 0) {
+    bool hud_stretch = (hud_env && strcmp(hud_env, "stretch") == 0);
+    if (hud_env && !hud_stretch && strcmp(hud_env, "centered") != 0 && strcmp(hud_env, "auto") != 0 && hud_env[0] != '\0') {
+        fprintf(stderr, "[WR64] Unknown WR64_HUD value '%s' (expected 'stretch' or 'centered'); using centered.\n", hud_env);
+    }
+    if (hud_stretch) {
         _putenv_s("RT64_RECT_ASPECT_DEFAULT", "stretch");
     }
+    fprintf(stderr, "[WR64] HUD aspect mode: %s\n", hud_stretch ? "stretch" : "centered");
 
     // WR64_DEV=1 enables RT64's developer inspector (toggle in-game with F1).
     const char* dev_env = std::getenv("WR64_DEV");
