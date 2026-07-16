@@ -112,20 +112,164 @@ for 45.0f/75.0f floats with periodic rescan since camera structs spawn per scene
   Also present: an army of ~18 stride-0x30 `$a3` inline-45.0 setters at
   0x8009BED8..0x8009C1B0 (per-course cameras?) — unclassified.
 
+  **Round 2 (2026-07-16, same script/method, SITES extended to the two
+  standalone sites + the full stride-~0x30 army):**
+
+  | handler | vram | projection mover |
+  |---|---|---|
+  | func_80089C08 | 0x80089C50 | no (camera not active in window) |
+  | func_8009B19C | 0x8009B1C8 | **YES** |
+  | func_8009BEBC | 0x8009BED8 | no (same caveat) |
+  | func_8009BEEC | 0x8009BF08 | no |
+  | func_8009BF1C | 0x8009BF38 | no |
+  | func_8009BF4C | 0x8009BF68 | no |
+  | func_8009BF7C | 0x8009BF98 | no |
+  | func_8009BFAC | 0x8009BFC8 | no |
+  | func_8009BFDC | 0x8009BFF8 | no |
+  | func_8009C00C | 0x8009C028 | no |
+  | func_8009C044 | 0x8009C060 | no |
+  | func_8009C074 | 0x8009C090 | no |
+  | func_8009C0A4 | 0x8009C0C0 | no |
+  | func_8009C0D4 | 0x8009C0F0 | no |
+  | func_8009C104 | 0x8009C120 | no |
+  | func_8009C134 | 0x8009C150 | no |
+  | func_8009C164 | 0x8009C180 | no |
+  | func_8009C194 | 0x8009C1B0 | no |
+
+  All 16 "army" sites came back negative under attract-demo probing — none of
+  them widened m11 in this window. Given the array is stride-~0x30 and 16-wide
+  (matches Wave Race 64's course count), the working hypothesis is these are
+  **per-course camera setters never active during the attract loop**, not
+  culling-only constants. Confirmed-negative-under-attract-demo is NOT the same
+  as confirmed-non-projection — resolving them needs a real per-course race
+  probe (drive automation into an actual race on each course), same caveat as
+  the two round-1 inconclusive dispatch sites (0x8009BA40, 0x8009BB0C).
+  Running tally: 4 confirmed projection movers (0x8009B93C, 0x8009BBC4,
+  0x8009BCD0, 0x8009B1C8); 20 sites still need in-race testing to classify
+  (2 dispatch + 1 standalone + 16 army + the ~25 remaining un-enumerated of
+  the 49 total).
+
+  **Round 3 (2026-07-16, scripts/classify_fov_sites_race.py + scripts/drive_to_race.ps1
+  — real Sunny Beach race, not attract demo):** built input automation that
+  drives the game from boot into an actual live Time Trials race on Sunny
+  Beach (posts WM_KEYDOWN/UP straight to the game's HWND, no focus needed —
+  see the script header for the exact confirmed menu sequence and the
+  extended-key-bit bug that made every Down-arrow tap silently resolve to
+  Numpad-2 instead). Re-probed the 19 sites round 1-2 could only mark
+  "camera not active in attract window": the 2 round-1 inconclusive dispatch
+  sites (0x8009BA40, 0x8009BB0C) plus all 17 remaining round-2 negatives
+  (0x80089C50 + the 16-wide army 0x8009BED8..0x8009C1B0).
+
+  **All 19 came back negative for the 66.5° projection, even under a real
+  race.** Racing also surfaces m11 values attract mode never showed at all
+  (0.577, 1.569, 2.148, 3.371, 4.688 — likely HUD/menu-overlay ortho
+  projections and other non-fovy matrices caught by the same telemetry hook),
+  but none of the 19 patched sites ever produced 1.527. Combined with the
+  army's structural signature (stride ~0x30, each site an near-identical
+  wrapper calling the same helper — func_8009BE40 for the dispatch-battery
+  ones — with $a3=45.0 and two fixed pointer args), this is now good evidence
+  these are genuinely **not projection/fovy movers**: most likely per-course
+  or per-difficulty setters for some other camera parameter (angle/tilt,
+  matching the earlier "two 45° fields" pitch-vs-fovy finding), or dead
+  code paths for camera modes Sunny Beach + Time Trials + Normal difficulty
+  don't reach. Final tally: **4 confirmed projection movers** total
+  (0x8009B93C, 0x8009BBC4, 0x8009BCD0, 0x8009B1C8) out of the 24 sites
+  actually tested across all three rounds; the remaining ~25 of 49 are still
+  unenumerated (funcs_5/funcs_7 standalone-style sites beyond the three
+  already found). Given rounds 2-3 agree on all 19 overlapping sites, further
+  bisection of the army specifically is likely low-yield — if it's ever
+  worth finishing, the next step is enumerating the rest of the 49 (not
+  re-testing the army) and/or testing other courses/difficulties in case a
+  handful of the army entries are genuinely per-course and Sunny Beach
+  simply isn't the one that activates them.
+
   **47.75° instruction patches: VALIDATED (2026-07-15).** With all 49 inline-45.0f
   sites patched (scripts/gen_fov_patches.py generates the TOML block), RT64
   telemetry shows m11=2.255966 = 47.75° live — the recompiler patch mechanism
   provably moves the projection. User perception at +6% is (correctly) nil; one
   user screenshot (Dolphin Park) shows real scene geometry continuing into the
   margins. Remaining engineering for full border removal:
-  1. A 45° source still appears in telemetry alongside 2.256 — some cameras get
-     fovy from a data table or differently-encoded constant. Find it.
-  2. The margin TINT: a fullscreen overlay pass (atmosphere/glare) is drawn only
-     over the inner rect — margins show untinted scene (clearly visible seam in
-     the user's screenshot). Widen that overlay's 2D quad.
-  3. The wave-mesh detail region (unchanged).
-  4. Bisect the 49 sites down to camera-only before shipping (some 45s are
-     likely physics/angle constants; no misbehavior observed in play-testing yet).
+  1. ~~A 45° source still appears in telemetry alongside 2.256~~ **SOLVED
+     (2026-07-16, round-4 group bisection via scripts/probe_fov_group.py +
+     drive_to_race.ps1):** the in-race camera fovy is a 51st-site situation —
+     it lives at **0x800A54E4 in func_800A52D8**, part of the 0x800Axxx block
+     rounds 1-3 never enumerated. With only that site patched, a live race
+     renders at 47.75° (m11=2.255966, no 2.414 left). func_800A52D8 has three
+     sibling inline-45.0f sites (0x800A5648, 0x800A57AC, 0x800A57B8) — likely
+     the other C-button camera view modes; untested, patch them if a view
+     mode still renders at 45°. SHIPPED: 5 permanent [[patches.instruction]]
+     entries in recomp/waverace64.toml (the 4 attract-demo movers + this).
+  2. ~~The margin TINT~~ **SOLVED (2026-07-16):** the send_dl tint-widening
+     rewrite already existed but widened the texrect to (0,0)-(319,239) —
+     ONE PIXEL short of the widened scissor (0,0)-(320,240). RT64 only
+     exempts a texrect from 2D aspect compensation (and lets it stretch
+     across the full widescreen framebuffer) when rect.lrx >= scissor.lrx
+     (`coversScissorWidth`, rt64_framebuffer_renderer.cpp ~1684); at 1px
+     short it was pinned to the centered 4:3 and the expanded margins stayed
+     untinted. Fixed by widening to exactly (320,240). Diagnostic that found
+     it: WR64_TEXRECT_LOG=1 logs every texrect the DL walk sees.
+  3. The wave-mesh detail region — still THE open blocker; see "Remaining
+     empty margins" below for what was newly established and ruled out on
+     2026-07-16.
+  4. ~~Bisect the 49 sites~~ DONE across rounds 1-4 (see Site classification
+     above): 5 confirmed projection movers shipped; the army is not
+     projection; ~24 of the 0x800Axxx block remain individually unclassified
+     but the only one that matters for the race view is 0x800A54E4.
+
+  **Remaining empty margins (2026-07-16, after fovy+tint fixes — the current
+  state of the hunt):** with the 5-site fovy patch + scissor + tint rewrites
+  active, an ultrawide race still shows flat clear-color bands at the window
+  edges (user-confirmed). What they are NOT (all tested on live Sunny Beach
+  races via drive_to_race.ps1):
+  - NOT the RSP viewport: theory was the world maps into the inner rect via
+    the Vp transform. Falsified twice: no G_MOVEMEM/G_MV_VIEWPORT command
+    appears at the TOP level of gameplay DLs at all (WR64_VP_LOG=1; they'd be
+    in branched sub-DLs the linear walk skips), and an RDRAM scan for the
+    inner-rect Vp signature — vscale=(604,396), vtrans=(636,476), plus
+    relaxed either-half variants (poke scan mode 5, rescanning every 600
+    updates well into the race) — found ZERO matching structs. The game does
+    not keep an inner-rect viewport anywhere in RDRAM.
+  - NOT the guFrustum array at 0x801D7B70: instrumented poke_frustum to dump
+    active entries every 300 calls — the array stays ENTIRELY INACTIVE
+    during real races too (stronger than the earlier attract-demo-only
+    negative). WR64_POKE_FRUSTUM is a dead end for this; an apparent success
+    in one run was race-circumstance (post-crash camera), not the poke.
+  What they ARE (WR64_POKE_FOV=2.0 differential test, screenshots in
+  drive_fovpoke/): with the frustum forced 2x wide, the SKY and TERRAIN
+  coverage follow the camera and fill the top/upper margins — but the WATER
+  mesh boundary does not move: same rectangle as at 47.75°. So sky/terrain
+  coverage is frustum-fit (fixable by fovy alone, at the cost of a
+  perceptible zoom-out — full vertical fill needs ~53.3°), while the wave
+  grid is pinned to something else (screen-rect or its own bounds struct) —
+  finding the wave-grid bounds source is the single remaining hunt for
+  border-free ultrawide water.
+
+  **Build-system trap (2026-07-16, root cause found):** builds appeared to
+  "succeed" while linking stale objects — new code/log strings missing from
+  the exe. NOT a cmake/ninja bug: (1) invoking `cmd /c scripts\rebuild.cmd`
+  from Git Bash can silently do nothing — MSYS argument conversion mangles
+  `/c` into a path, cmd prints its banner and exits 0 without running the
+  batch (use PowerShell or Python subprocess, or `cmd //c` from bash);
+  (2) an edit had also saved rebuild.cmd with LF-only line endings + UTF-8
+  em-dashes, which cmd misparses silently — batch files must stay ASCII with
+  CRLF. rebuild.cmd now documents both, calls ninja directly (twice; the
+  N64Recomp-triggered CMake reconfigure makes the first pass conservative),
+  echoes a named failure per step, and ends with a STALENESS GUARD: it
+  exits nonzero listing any src/*.cpp|*.h newer than the linked exe, and
+  prints "rebuild OK: <exe timestamp>" on success — a silent stale build is
+  no longer possible.
+
+  **Diagnostics added 2026-07-16 (all in src/rt64_render_context.cpp):**
+  - WR64_TEXRECT_LOG=1 — log every texrect (decoded 10.2 coords) the DL walk
+    sees; found the tint variant mismatch.
+  - WR64_VP_LOG=1 — log G_MOVEMEM/G_MV_VIEWPORT commands (none at top level
+    of gameplay DLs; kept for future sub-DL work).
+  - WR64_POKE_SCAN now rescans every 600 updates (first at 300) — per-scene
+    structs don't exist yet at update 300, which lands in the menus; the
+    last scan before exit wins.
+  - poke scan mode 5 — Vp-struct signature scan (exact + relaxed halves).
+  - poke_frustum dumps all 9 fields of each active 0x801D7B70 entry every
+    300 calls, including a tick line when nothing is active.
 
   **Endgame procedure (if pop-in is visible):** instruction-patch the 8 inline sites in small groups
   (via [[patches.instruction]] in waverace64.toml; 45.0f → ~47.7f needs

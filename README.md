@@ -38,14 +38,14 @@ process left behind.
 | **Phase 3** | Runtime Integration | **COMPLETE** |
 | **Phase 4** | Build & Link (RT64 + Runtime) | **COMPLETE** |
 | **Phase 5** | Audio & Input | **COMPLETE** -- input verified by hand, audio via recompiled RSP microcode at 32 kHz |
-| **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode fully stable; races being play-tested |
-| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand), FPS counter, dev inspector |
+| **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode, menus, and races stable (races exercised extensively by the automated race driver, `scripts/drive_to_race.ps1`) |
+| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand), per-scene 4:3 menus, camera FOV widened via shipped instruction patches, FPS counter, dev inspector |
 | **Phase 8** | Release Preparation | Not Started |
 
-> **Playable (early).** The game boots, renders attract mode stably, menus respond to
-> keyboard/controller, and music/voices play correctly. Remaining crashes during
-> gameplay are missing indirect-call symbols, fixable in minutes with the included
-> tooling (see `scripts/`).
+> **Playable.** The game boots, menus respond to keyboard/controller, races run
+> stably start to finish, and music/voices play correctly. Any residual crash from
+> a missing indirect-call symbol is fixable in minutes with the included tooling
+> (see `scripts/`).
 
 ### Build Statistics
 
@@ -67,15 +67,19 @@ process left behind.
   during play-testing (automated fix loop: `scripts/bringup_loop.ps1`)
 - **No settings UI yet** (settings via environment variables, see below)
 - **Widescreen rough edges** (needs game patches): objects can pop in at the screen
-  edges because the game culls against the 4:3 frustum. HUD/menu handling is solved
-  (see `WR64_BORDERS=0` and the per-scene presentation below)
-- **Black borders** around the game image: drawn by the game inside its framebuffer
-  (CRT overscan compensation). Scissor-rewrite removal exists (`WR64_BORDERS=0`,
-  experimental) but the revealed margins are half-rendered. Root cause now mostly
-  cracked (see `docs/RE-NOTES.md`): the game renders guPerspective(45°, 4:3); the
-  camera FOV is locatable and widenable at runtime (verified). Whether object culling
-  follows the FOV is still unconfirmed, and the detailed wave-mesh region is sized
-  independently. Shares its fix with widescreen edge pop-in
+  edges because the game culls against its original frustum — confirmed NOT to
+  follow the camera FOV. HUD/menu handling is solved (see `WR64_BORDERS=0` and the
+  per-scene presentation below)
+- **Black borders / empty margins**: the original black borders (drawn by the game
+  inside its framebuffer as CRT overscan compensation) are removed by
+  `WR64_BORDERS=0`, and most of the revealed area now renders correctly: the camera
+  FOV ships widened 45° → 47.75° via recompiler instruction patches (5 bisected
+  sites incl. the in-race camera), and the fullscreen atmosphere tint covers the
+  whole frame (no more color seam). What remains at extreme aspect ratios:
+  the **wave-mesh coverage** does not follow the camera (its bounds source is
+  still being hunted) and sky coverage is frustum-fit, so ultrawide windows can
+  still show flat-color margins beyond the water/sky coverage. Full trail in
+  `docs/RE-NOTES.md`. Shares its fix with widescreen edge pop-in
 
 ### Environment variables & keys
 
@@ -90,7 +94,7 @@ process left behind.
 | `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
 | `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: clouds stutter (billboards regenerate per game frame and can't be matched for interpolation — see `docs/RE-NOTES.md`) |
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
-| `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F2 ray tracing, F3 raw-RDRAM view, F4 texture replacements. Debug keys are inert without this. |
+| `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
 
 Keyboard: WASD = stick, X = A, Z = B, LShift = Z, Return = START, arrows = D-pad,
@@ -329,7 +333,10 @@ WaveRace64-Recomp/
 | [`find_indirect_targets.py`](scripts/find_indirect_targets.py) | Scans ROM data for function-pointer-table targets missed by JAL scanning; validates against `jr $ra` boundaries and filters switch jump tables. `--apply` for batch splits, `--split 0xADDR` for one crash address |
 | [`bringup_loop.ps1`](scripts/bringup_loop.ps1) | Unattended crash-driven loop: run the game, split the symbol at any "Failed to find function" address, regenerate, rebuild, repeat |
 | [`audio_ucode_loop.ps1`](scripts/audio_ucode_loop.ps1) | Same loop for the audio microcode's "Unhandled jump target" errors (note: those print to **stdout**) |
-| [`drive_to_menu.ps1`](scripts/drive_to_menu.ps1) | Autonomous UI test driver: boots the game, navigates title → watercraft select with synthesized scancode keyboard input, saves per-step screenshots and stderr telemetry to `drive_out/`. Combine with `WR64_WINDOW=1920x800` to reproduce ultrawide layout bugs without manual testing |
+| [`drive_to_menu.ps1`](scripts/drive_to_menu.ps1) | Autonomous UI test driver: boots the game and navigates title → watercraft select, saving per-step screenshots and stderr telemetry to `drive_out/`. Input is posted straight to the game window's message queue (no focus steal — the game can sit behind other windows). Combine with `WR64_WINDOW=1920x800` to reproduce ultrawide layout bugs without manual testing |
+| [`drive_to_race.ps1`](scripts/drive_to_race.ps1) | Autonomous race driver: boots the game, navigates title → Time Trials → Sunny Beach → live race and holds the accelerator, capturing screenshots + telemetry. Same no-focus-steal input as above. The workhorse behind the FOV-site classification sweeps |
+| [`classify_fov_sites.py`](scripts/classify_fov_sites.py) / [`classify_fov_sites_race.py`](scripts/classify_fov_sites_race.py) | Per-site camera-FOV bisection: patch one inline-45.0f site at a time (via `[[patches.instruction]]`), rebuild, probe attract demos / a live race, and classify by RT64 projection telemetry |
+| [`probe_fov_group.py`](scripts/probe_fov_group.py) | Group-bisection variant: patch an arbitrary set of FOV sites per run — found the in-race camera site in ~6 runs instead of 28 |
 
 ## Related Projects
 

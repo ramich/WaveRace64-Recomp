@@ -44,3 +44,41 @@ ignored = [
 # in the display list (src/rt64_render_context.cpp, send_dl) — the border
 # scissor is built by 20+ functions across the scene overlays, so per-site
 # instruction patches don't scale. WR64_BORDERS=1 keeps the original borders.
+
+# Camera fovy: 45.0 -> 47.75 degrees (320/302 — matches the widened scissor,
+# so scene geometry fills the reclaimed border area instead of showing the
+# old view edge). These are the 4 confirmed PROJECTION movers out of the 49
+# inline-45.0f sites, isolated by three bisection rounds (attract-demo +
+# real-race probing, docs/RE-NOTES.md "Site classification"): the other 45
+# sites never moved the projection matrix and are left untouched (likely
+# camera-angle/physics constants — one is a pitch writer that flips the view
+# upside down at large values).
+[[patches.instruction]]
+func = "func_8009B910"
+vram = 0x8009B93C
+value = 0x3C01423F # lui $at, 0x423F (47.75f, was 45.0f)
+
+[[patches.instruction]]
+func = "func_8009BB98"
+vram = 0x8009BBC4
+value = 0x3C01423F # lui $at, 0x423F (47.75f, was 45.0f)
+
+[[patches.instruction]]
+func = "func_8009BCA4"
+vram = 0x8009BCD0
+value = 0x3C01423F # lui $at, 0x423F (47.75f, was 45.0f)
+
+[[patches.instruction]]
+func = "func_8009B19C"
+vram = 0x8009B1C8
+value = 0x3C01423F # lui $at, 0x423F (47.75f, was 45.0f)
+
+# THE in-race camera fovy (round-4 group bisection, real-race probing): with
+# only this site patched, a live race renders at 47.75deg (m11=2.256). The
+# same function has three sibling inline-45.0f sites (0x800A5648, 0x800A57AC,
+# 0x800A57B8) — likely the other C-button camera view modes; patch them too
+# if a view mode is found still rendering at 45.
+[[patches.instruction]]
+func = "func_800A52D8"
+vram = 0x800A54E4
+value = 0x3C01423F # lui $at, 0x423F (47.75f, was 45.0f)

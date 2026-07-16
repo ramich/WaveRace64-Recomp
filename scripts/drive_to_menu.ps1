@@ -17,19 +17,25 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class KeySend {
-    [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
     [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint uCode, uint uMapType);
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
+    [DllImport("user32.dll")] public static extern IntPtr PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-    public const uint KEYUP = 0x0002;
-    // SDL reads scancodes: send the real scancode, not just the VK.
-    public static void Tap(byte vk, int holdMs) {
+    const uint WM_KEYDOWN = 0x0100;
+    const uint WM_KEYUP = 0x0101;
+    // Posted directly to the game's HWND message queue (no SetForegroundWindow,
+    // no keybd_event) so the window never needs focus and can sit behind other
+    // windows while this drives it. SDL2's WndProc processes WM_KEYDOWN/UP from
+    // any source the same way; keybd_event instead injects into the real
+    // hardware queue, which Windows only routes to the foreground window.
+    public static void Tap(IntPtr hwnd, byte vk, int holdMs) {
         byte scan = (byte)MapVirtualKey(vk, 0);
-        keybd_event(vk, scan, 0, UIntPtr.Zero);
+        uint lParamDown = 1u | ((uint)scan << 16);
+        uint lParamUp = 1u | ((uint)scan << 16) | (1u << 30) | (1u << 31);
+        PostMessage(hwnd, WM_KEYDOWN, (IntPtr)vk, (IntPtr)(long)lParamDown);
         System.Threading.Thread.Sleep(holdMs);
-        keybd_event(vk, scan, KEYUP, UIntPtr.Zero);
+        PostMessage(hwnd, WM_KEYUP, (IntPtr)vk, (IntPtr)(long)lParamUp);
     }
 }
 '@
@@ -60,8 +66,6 @@ Write-Host "Launched pid $($proc.Id), settling $SettleSeconds s..."
 Start-Sleep -Seconds $SettleSeconds
 
 if ($proc.HasExited) { Write-Host 'Process exited early!'; exit 1 }
-[KeySend]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
-Start-Sleep -Milliseconds 500
 
 # VK codes: Enter=0x0D, X=0x58
 $VK_ENTER = 0x0D; $VK_X = 0x58
@@ -74,12 +78,15 @@ $steps = @(
     @{ key = $VK_X;     name = 'a1'     ; wait = 3 },
     @{ key = $VK_X;     name = 'a2'     ; wait = 3 },
     @{ key = $VK_X;     name = 'a3'     ; wait = 4 },
-    @{ key = $VK_X;     name = 'a4'     ; wait = 4 }
+    @{ key = $VK_X;     name = 'a4'     ; wait = 4 },
+    @{ key = $VK_X;     name = 'a5'     ; wait = 4 },
+    @{ key = $VK_X;     name = 'a6'     ; wait = 4 },
+    @{ key = $VK_X;     name = 'a7'     ; wait = 5 },
+    @{ key = $VK_X;     name = 'a8'     ; wait = 5 }
 )
 foreach ($s in $steps) {
     Write-Host "Tap $($s.name)"
-    [KeySend]::SetForegroundWindow($hwnd) | Out-Null
-    [KeySend]::Tap([byte]$s.key, 250)
+    [KeySend]::Tap($hwnd, [byte]$s.key, 250)
     Start-Sleep -Seconds $s.wait
     Save-WindowShot $hwnd (Join-Path $OutDir "$($s.name).png")
 }

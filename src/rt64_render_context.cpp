@@ -157,6 +157,37 @@ static void poke_scan(uint8_t* rdram, int mode) {
                 count++;
             }
         }
+    } else if (mode == 5) {
+        // Vp (RSP viewport) structs mapping the 3D world into the inner view
+        // rect: s16 vscale[4] then s16 vtrans[4], components in 10.2 fixed.
+        // Inner rect (8,20)-(310,218) = 302x198 centered (159,119):
+        // vscale=(604,396,z,0), vtrans=(636,476,z,0). The viewport — not the
+        // scissor — is why widened-scissor frames still show empty margins:
+        // geometry can't land outside the viewport rect. No G_MOVEMEM
+        // viewport appears at the top level of gameplay DLs (set from
+        // branched sub-DLs), so the structs get poked directly.
+        for (uint32_t g = 0x80000010; g < 0x807FFFE0 && count < 4096; g += 2) {
+            // Exact expected signature.
+            if (rd16g(rdram, g) == 604 && rd16g(rdram, g + 2) == 396 &&
+                rd16g(rdram, g + 6) == 0 &&
+                rd16g(rdram, g + 8) == 636 && rd16g(rdram, g + 10) == 476 &&
+                rd16g(rdram, g + 14) == 0) {
+                fprintf(f, "V 0x%08X %d %d\n", g,
+                    (int16_t)rd16g(rdram, g + 4), (int16_t)rd16g(rdram, g + 12));
+                count++;
+            }
+            // Relaxed probes, in case the real struct differs from the guess:
+            // any vscale=(604,396) pair, or any vtrans=(636,476) pair, dumped
+            // with 8 surrounding shorts for manual identification.
+            else if ((rd16g(rdram, g) == 604 && rd16g(rdram, g + 2) == 396) ||
+                     (rd16g(rdram, g) == 636 && rd16g(rdram, g + 2) == 476)) {
+                fprintf(f, "v 0x%08X ", g);
+                for (int k = -2; k < 6; k++)
+                    fprintf(f, "%d ", (int16_t)rd16g(rdram, g + k * 2));
+                fprintf(f, "\n");
+                count++;
+            }
+        }
     } else {
         // mode 4: camera FOV values. RT64 telemetry proved the live projection
         // is guPerspective(fovy=45deg, 4:3): m11 == cot(22.5deg). The camera
@@ -220,17 +251,24 @@ static void poke_frustum(uint8_t* rdram) {
     constexpr uint32_t STRIDE = 0x24;
     constexpr float SCALE = 1.3f;
     static uint32_t last_written[8][3] = {};
-    static bool logged = false;
+    // Periodic state dump (every ~300 calls), including when NOTHING is
+    // active: an earlier run logged only on the first active entry, so an
+    // all-inactive race was indistinguishable from a poke that worked.
+    static uint32_t calls = 0;
+    if ((++calls % 300) == 1) {
+        for (int i = 0; i < 8; i++) {
+            uint32_t entry = BASE + i * STRIDE;
+            if (rd32g(rdram, entry) == 0) continue;
+            fprintf(stderr, "[FRUSTUM] entry %d fields:", i);
+            for (int k = 0; k < 9; k++)
+                fprintf(stderr, " +%02X=0x%08X", k * 4, rd32g(rdram, entry + k * 4));
+            fprintf(stderr, "\n");
+        }
+        fprintf(stderr, "[FRUSTUM] scan tick %u done\n", calls);
+    }
     for (int i = 0; i < 8; i++) {
         uint32_t entry = BASE + i * STRIDE;
         if (rd32g(rdram, entry) == 0) continue;
-        if (!logged) {
-            logged = true;
-            fprintf(stderr, "[FRUSTUM] entry %d active: int4=%d r=%f t=%f\n", i,
-                (int32_t)rd32g(rdram, entry + 0x04),
-                bits_to_f(rd32g(rdram, entry + 0x1C)),
-                bits_to_f(rd32g(rdram, entry + 0x14)));
-        }
 
         uint32_t v_int = rd32g(rdram, entry + 0x04);
         uint32_t v_r = rd32g(rdram, entry + 0x1C);
@@ -653,9 +691,32 @@ public:
                     // Widen it to cover the full framebuffer.
                     if (op == 0xE4) {
                         uint32_t w1 = *(uint32_t*)(rdram + addr + 4);
+                        // WR64_TEXRECT_LOG=1: log every texrect seen by this
+                        // walk (10.2 coords decoded), to find per-scene tint
+                        // variants that the exact-match rewrite below misses.
+                        static const char* trlog = std::getenv("WR64_TEXRECT_LOG");
+                        if (trlog && trlog[0] == '1') {
+                            static int tr_seen = 0;
+                            if ((++tr_seen % 20) == 0) {
+                                fprintf(stderr,
+                                    "[TEXRECT] w0=%08X w1=%08X rect=(%u,%u)-(%u,%u) tile=%u\n",
+                                    w0, w1,
+                                    (w1 >> 14) & 0x3FF, (w1 >> 2) & 0x3FF,
+                                    (w0 >> 14) & 0x3FF, (w0 >> 2) & 0x3FF,
+                                    (w1 >> 24) & 0x7);
+                            }
+                        }
                         if (w0 == 0xE44D8368u && (w1 & 0x00FFFFFFu) == 0x00024054u) {
-                            // (9,21)-(310,218) -> (0,0)-(319,239), keep tile bits.
-                            *(uint32_t*)(rdram + addr) = 0xE44FC3BCu;
+                            // (9,21)-(310,218) -> (0,0)-(320,240), keep tile bits.
+                            // Must reach the widened scissor's lrx/lry EXACTLY:
+                            // RT64 only exempts a texrect from 2D aspect
+                            // compensation (and lets it stretch across the full
+                            // widescreen framebuffer) when rect.lrx >=
+                            // scissor.lrx (rt64_framebuffer_renderer.cpp,
+                            // coversScissorWidth). At (319,239) it was 1px
+                            // short, got pinned to the centered 4:3, and left
+                            // the expanded margins untinted.
+                            *(uint32_t*)(rdram + addr) = 0xE45003C0u;
                             *(uint32_t*)(rdram + addr + 4) = w1 & 0xFF000000u;
                         }
                     }
@@ -666,6 +727,36 @@ public:
                         if (x0 <= 40 && y0 <= 88 && x1 >= 1200 && y1 >= 856) {
                             *(uint32_t*)(rdram + addr) = 0xED000000u;
                             *(uint32_t*)(rdram + addr + 4) = (w1 & 0xFF000000u) | (1280u << 12) | 960u;
+                        }
+                    }
+                    // G_MOVEMEM viewport (F3DEX op 0xBC, index G_MV_VIEWPORT).
+                    // The 3D world is mapped into the inner view rect by the
+                    // VIEWPORT transform, not the scissor — widening the
+                    // scissor alone leaves clear-color margins with no
+                    // geometry. WR64_VP_LOG=1 dumps every viewport seen so the
+                    // inner-rect signature can be identified and rewritten.
+                    // F3DEX gsDma1p encoding: w0 = [cmd 8][index 8][length 16],
+                    // G_MV_VIEWPORT = 0x80 -> w0 = 0xBC800010. NOTE: no
+                    // viewport command appears at the TOP level of the
+                    // gameplay DLs (they are set from branched sub-DLs this
+                    // linear walk does not follow) — the viewport widening
+                    // below therefore pokes the Vp STRUCTS found by RDRAM
+                    // scan instead of rewriting DL commands.
+                    if (op == 0xBC && ((w0 >> 16) & 0xFF) == 0x80) {
+                        static const char* vplog = std::getenv("WR64_VP_LOG");
+                        if (vplog && vplog[0] == '1') {
+                            uint32_t w1 = *(uint32_t*)(rdram + addr + 4);
+                            uint32_t vp = w1 & 0x00FFFFFFu;
+                            static int vp_seen = 0;
+                            if ((++vp_seen % 20) == 0) {
+                                int16_t v[8];
+                                for (int k = 0; k < 8; k++)
+                                    v[k] = (int16_t)rd16g(rdram, 0x80000000u + vp + k * 2);
+                                fprintf(stderr,
+                                    "[VP] at 0x%08X scale=(%d,%d,%d,%d) trans=(%d,%d,%d,%d)\n",
+                                    0x80000000u + vp,
+                                    v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
+                            }
                         }
                     }
                 }
@@ -703,7 +794,13 @@ public:
             // Culling-bounds bisection harness (see scripts/bisect_culling.py).
             {
                 const char* scan_env = std::getenv("WR64_POKE_SCAN");
-                if (scan_env && scan_env[0] >= '1' && scan_env[0] <= '9' && update_count == 300) {
+                // Rescan every 600 updates after the first: per-scene structs
+                // (race cameras, viewports) don't exist yet at update 300,
+                // which lands in the menus. Each pass overwrites
+                // poke_candidates.txt, so the LAST scan before exit wins —
+                // park the game in the state of interest.
+                if (scan_env && scan_env[0] >= '1' && scan_env[0] <= '9' &&
+                    (update_count == 300 || (update_count % 600) == 0)) {
                     poke_scan(app_->core.RDRAM, scan_env[0] - '0');
                 }
                 if (!s_poke_loaded) {
