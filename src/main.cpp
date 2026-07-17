@@ -29,6 +29,10 @@
 #include "recompui/program_config.h"
 #include "recompui/config.h"
 #include "nfd.h"
+
+// WR64-specific renderer settings exposed by rt64_render_context.cpp.
+extern void wr64_set_show_borders(bool show);
+extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
 #endif
 
 // Pull in the recompiled function declarations and overlay tables.
@@ -442,6 +446,34 @@ int main(int argc, char* argv[]) {
     recompui::config::create_controls_tab();
     recompui::config::create_sound_tab();
     recompui::config::create_mods_tab();
+
+    // WR64-specific game settings tab.
+    {
+        recomp::config::Config& wr64_cfg = recompui::config::create_config_tab("WR64", "wr64_settings", false);
+        wr64_cfg.add_bool_option("show_borders", "Show Borders",
+            "Show the original CRT-overscan black borders. Off by default: the game renders edge-to-edge with a wider camera.",
+            false);
+        wr64_cfg.add_enum_option("wave_grid", "Wave Detail Area",
+            "How far the detailed foam-water mesh extends into widescreen. Larger fills more of an ultrawide screen.",
+            {
+                {0u, "stock",  "Stock (19x35)"},
+                {1u, "wide",   "Wide (23x55)"},
+                {2u, "wider",  "Wider (28x70)"},
+            }, 1u);
+
+        auto apply_wr64 = []() {
+            recomp::config::Config& cfg = recompui::config::get_config("wr64_settings");
+            wr64_set_show_borders(std::get<bool>(cfg.get_option_value("show_borders")));
+            static constexpr uint32_t rows[] = {19, 23, 28};
+            static constexpr uint32_t cols[] = {35, 55, 70};
+            uint32_t idx = std::get<uint32_t>(cfg.get_option_value("wave_grid"));
+            if (idx >= 3) idx = 1;
+            wr64_set_wavegrid(rows[idx], cols[idx]);
+        };
+        wr64_cfg.set_load_callback(apply_wr64);
+        wr64_cfg.set_save_callback(apply_wr64);
+    }
+
     recompui::config::finalize();
 
     recompui::register_launcher_init_callback([](recompui::LauncherMenu* menu) {

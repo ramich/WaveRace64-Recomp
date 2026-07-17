@@ -82,6 +82,17 @@ static void dummy_check_interrupts() {}
 static std::atomic<RT64::Application*> s_app{nullptr};
 
 // ---------------------------------------------------------------------------
+// WR64-specific game settings — configurable via launcher UI or env vars.
+// Statics are module-internal; setters are called by the launcher callbacks.
+// ---------------------------------------------------------------------------
+static bool     s_show_borders  = false; // false = border removal ON (default)
+static uint32_t s_wavegrid_rows = 23;    // default wide wave grid
+static uint32_t s_wavegrid_cols = 55;
+
+void wr64_set_show_borders(bool show)                        { s_show_borders  = show; }
+void wr64_set_wavegrid(uint32_t rows, uint32_t cols)         { s_wavegrid_rows = rows; s_wavegrid_cols = cols; }
+
+// ---------------------------------------------------------------------------
 // GraphicsConfig → RT64 UserConfiguration helpers
 // ---------------------------------------------------------------------------
 
@@ -556,6 +567,23 @@ public:
             app_->userConfig.refreshRate = RT64::UserConfiguration::RefreshRate::Display;
         }
 
+        // Initialize WR64 game-settings statics from env vars. The launcher
+        // config callbacks call wr64_set_* after finalize() to override these
+        // with the user's saved preferences; env vars are the fallback.
+        {
+            const char* b = std::getenv("WR64_BORDERS");
+            if (b && b[0] == '1') s_show_borders = true;
+
+            const char* wg = std::getenv("WR64_WAVEGRID");
+            if (wg) {
+                unsigned r = 0, c = 0;
+                if (sscanf(wg, "%ux%u", &r, &c) == 2 && r >= 4 && c >= 4) {
+                    s_wavegrid_rows = r > 40 ? 40 : r;
+                    s_wavegrid_cols = c > 96 ? 96 : c;
+                }
+            }
+        }
+
         // Attempt setup.
         auto result = app_->setup(0);
 
@@ -675,8 +703,7 @@ public:
         // (cannot extend past the original fb region). History and RE trail:
         // docs/RE-NOTES.md.
         {
-            static const char* borders_env = std::getenv("WR64_BORDERS");
-            if (!borders_env || borders_env[0] != '1') {
+            if (!s_show_borders) {
                 uint8_t* rdram = app_->core.RDRAM;
 
                 // Pass 1: gameplay detection. Gameplay frames draw the
@@ -821,23 +848,9 @@ public:
                     // widescreen. 23x55 verified stable at full frame rate
                     // (27x63 also fine). WR64_WAVEGRID=RxC overrides.
                     {
-                        static uint32_t wg_rows = 23, wg_cols = 55;
-                        static bool wg_parsed = false;
-                        if (!wg_parsed) {
-                            wg_parsed = true;
-                            const char* wg = std::getenv("WR64_WAVEGRID");
-                            if (wg) {
-                                unsigned r = 0, c = 0;
-                                if (sscanf(wg, "%ux%u", &r, &c) == 2 && r >= 4 && c >= 4) {
-                                    // Clamp: huge grids risk DL/vertex-buffer overflow.
-                                    wg_rows = r > 40 ? 40 : r;
-                                    wg_cols = c > 96 ? 96 : c;
-                                }
-                            }
-                        }
                         if (is_gameplay) {
-                            wr32g(rdram, 0x800DA8B8u, wg_rows);
-                            wr32g(rdram, 0x800DA8BCu, wg_cols);
+                            wr32g(rdram, 0x800DA8B8u, s_wavegrid_rows);
+                            wr32g(rdram, 0x800DA8BCu, s_wavegrid_cols);
                         }
                     }
                     // Keep world projections on RT64's wide-viewport path even
