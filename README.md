@@ -68,29 +68,30 @@ process left behind.
 - **No settings UI yet** (settings via environment variables, see below)
 - **Widescreen rough edges** (needs game patches): objects can pop in at the screen
   edges because the game culls against its original frustum — confirmed NOT to
-  follow the camera FOV. HUD/menu handling is solved (see `WR64_BORDERS=0` and the
-  per-scene presentation below)
-- **Black borders / empty margins**: the original black borders (drawn by the game
-  inside its framebuffer as CRT overscan compensation) are removed by
-  `WR64_BORDERS=0`, and most of the revealed area now renders correctly: the camera
-  FOV ships widened 45° → 47.75° via recompiler instruction patches (5 bisected
-  sites incl. the in-race camera), and the fullscreen atmosphere tint covers the
-  whole frame (no more color seam). What remains at extreme aspect ratios:
-  the **wave-mesh coverage** does not follow the camera (its bounds source is
-  still being hunted) and sky coverage is frustum-fit, so ultrawide windows can
-  still show flat-color margins beyond the water/sky coverage. Full trail in
-  `docs/RE-NOTES.md`. Shares its fix with widescreen edge pop-in
+  follow the camera FOV. HUD/menu handling is solved (per-scene presentation below)
+- **Borders removed by default** (`WR64_BORDERS=1` restores the stock look): the
+  game draws black CRT-overscan borders inside its own framebuffer; the port
+  widens the game's scissors (top-level and sub-DL), ships the camera FOV widened
+  45° → 47.75° via recompiler instruction patches (5 bisected sites incl. the
+  in-race camera), stretches the atmosphere tint over the full frame, and
+  enlarges the detail-water wave grid (stock 19×35 → 23×55, `WR64_WAVEGRID`).
+  Remaining seams at extreme aspect ratios: the **shore strip** (the game
+  CPU-clips its large ground polygons to the original view rect — hunt ongoing)
+  and the water-foam framebuffer effect (structurally limited to the original
+  fb region). Full trail in `docs/RE-NOTES.md`. Shares its fix with widescreen
+  edge pop-in
 
 ### Environment variables & keys
 
 | Setting | Effect |
 |---------|--------|
 | `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
-| `WR64_BORDERS=0` | Border removal via scissor rewrite — **also fixes the stretched HUD in widescreen** (the rewritten 4:3 scissor re-enables RT64's aspect compensation for HUD elements) and **enables per-scene presentation**: 2D menus (watercraft select) present as centered 4:3 with black pillars, everything with a live 3D world stays widescreen. Margins are still only partially rendered (culling/wave-grid, see RE-NOTES); default remains original borders |
-| `WR64_SCENE_ASPECT=0` | Disable the per-scene 4:3 menu presentation (keep everything widescreen). Only relevant with `WR64_BORDERS=0` |
+| `WR64_BORDERS=1` | Restore the original in-framebuffer black borders. Border removal is the **default**: scissors (top-level and sub-DL) are widened, the atmosphere tint covers the full frame, the wave grid is enlarged, the HUD keeps proportions in widescreen, and 2D menus present as centered 4:3 (per-scene presentation). Remaining seams at extreme aspect ratios: the shore strip (game CPU-clips it to its view rect) and the water-foam framebuffer effect (see RE-NOTES) |
+| `WR64_WAVEGRID=RxC` | Detail-water mesh grid size override (default `23x55`, stock game `19x35`, clamped to `40x96`). Larger grids extend the detailed foam water further into widescreen margins at negligible cost on PC |
+| `WR64_SCENE_ASPECT=0` | Disable the per-scene 4:3 menu presentation (keep everything widescreen). Only relevant while borders are removed (default) |
 | `WR64_SCENE_DEBUG=1` | Log the scene classifier (`[SCENE] world= menuworld= ... -> wide/menu`) |
 | `WR64_WINDOW=WxH` | Startup window size override (e.g. `1600x900`) |
-| `WR64_HUD=stretch` | Stretch all 2D (HUD and menus) with the window in widescreen instead of keeping it proportional/centered (default: centered; the centered mode requires `WR64_BORDERS=0` for RT64's compensation to engage). A third mode — proportional elements anchored to the window edges — needs per-element extended-GBI tagging (future game patches) |
+| `WR64_HUD=stretch` | Stretch all 2D (HUD and menus) with the window in widescreen instead of keeping it proportional/centered (default: centered; the centered mode relies on border removal — the default — for RT64's compensation to engage). A third mode — proportional elements anchored to the window edges — needs per-element extended-GBI tagging (future game patches) |
 | `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
 | `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: clouds stutter (billboards regenerate per game frame and can't be matched for interpolation — see `docs/RE-NOTES.md`) |
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |

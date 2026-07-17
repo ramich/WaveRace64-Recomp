@@ -39,6 +39,11 @@ extern "C" uint32_t rt64_wr64_menu_world_proj_loads();
 // Exported by lib/rt64 rt64_vi_renderer.cpp (WR64 patch): pillarbox the final
 // present blit to 4:3. Aspect config stays Expand permanently.
 extern "C" void rt64_wr64_set_present_crop43(int enabled);
+extern "C" void rt64_wr64_set_scissor_widen(int enabled);
+extern "C" void rt64_wr64_set_scissor_widen_mask(uint32_t mask);
+extern "C" uint32_t rt64_wr64_scissor_match_count();
+extern "C" void rt64_wr64_set_viewport_widen(int enabled);
+extern "C" void rt64_wr64_set_wide_world(int enabled);
 
 // ---------------------------------------------------------------------------
 // Static dummy buffers required by RT64 (must persist for the lifetime of app)
@@ -522,18 +527,21 @@ public:
         uint32_t ucode_data_phys = static_cast<uint32_t>(task->t.ucode_data) & 0x3FFFFFFu;
         uint32_t dl_start_phys   = static_cast<uint32_t>(task->t.data_ptr)   & 0x3FFFFFFu;
 
-        // Border removal (EXPERIMENTAL, opt-in via WR64_BORDERS=0): the game
-        // scissors rendering to ~(8,20)-(310,218), drawing black CRT-overscan
-        // borders inside its own framebuffer. Rewriting the G_SETSCISSOR
-        // commands here reveals the full render, BUT the game also culls
-        // objects and the detailed wave mesh against the original view rect,
-        // so the revealed margins currently show only the flat ocean with a
-        // visible color seam (user-verified). Proper removal needs the game's
-        // view-bounds variables widened via game patches — until then the
-        // original borders remain the default.
+        // Border removal (DEFAULT ON since 2026-07-17; WR64_BORDERS=1
+        // restores the stock look): the game scissors rendering to
+        // ~(8,20)-(310,218), drawing black CRT-overscan borders inside its
+        // own framebuffer. This block rewrites/widens the scissors (top-level
+        // words here, sub-DL scissors via the rt64 fork hooks), widens the
+        // fullscreen tint, enlarges the wave grid, and drives the per-scene
+        // 4:3 menu presentation. Works together with the shipped 47.75-deg
+        // fovy instruction patches (recomp/waverace64.toml). Known remaining
+        // seams at extreme aspect ratios: shore-strip geometry (game
+        // CPU-clips it to its view rect) and the foam framebuffer effect
+        // (cannot extend past the original fb region). History and RE trail:
+        // docs/RE-NOTES.md.
         {
             static const char* borders_env = std::getenv("WR64_BORDERS");
-            if (borders_env && borders_env[0] == '0') {
+            if (!borders_env || borders_env[0] != '1') {
                 uint8_t* rdram = app_->core.RDRAM;
 
                 // Pass 1: gameplay detection. Gameplay frames draw the
@@ -638,6 +646,76 @@ public:
                         // in-flight queues, without it the differently-sized
                         // stale targets ghost through the menu.
                         rt64_wr64_set_present_crop43(wanted == 0 ? 1 : 0);
+                    }
+                }
+
+                // Widen inner-rect scissors at RT64 processing time too (all
+                // sub-DLs, segment-resolved) — the top-level word rewrite
+                // below misses the wave-mesh/water pass, whose scissor is set
+                // from a branched sub-DL and kept the water clipped to the
+                // inner rect. Gameplay frames only, same rule as the rewrite.
+                // WR64_SCISSOR_MASK (hex bitmask over per-frame matching
+                // scissor indices) selects WHICH matching scissors get
+                // widened at RDP STATE level. Default 0x6: indices 1-2 (the
+                // wave-mesh passes) widen; index 0 must NOT be widened here —
+                // its rect drives RT64's fbPair/projection aspect
+                // classification and widening it collapses the world into an
+                // unstretched 4:3 band (user-confirmed regression). The
+                // per-CALL clipping that index 0 used to cause is handled
+                // separately at GPU-scissor conversion time in the rt64 fork
+                // (rt64_framebuffer_renderer.cpp, gated by wide_world).
+                {
+                    static uint32_t scissor_mask = []() {
+                        const char* m = std::getenv("WR64_SCISSOR_MASK");
+                        return m ? (uint32_t)strtoul(m, nullptr, 16) : 0x6u;
+                    }();
+                    static bool mask_sent = false;
+                    if (!mask_sent) {
+                        mask_sent = true;
+                        rt64_wr64_set_scissor_widen_mask(scissor_mask);
+                    }
+                    rt64_wr64_set_scissor_widen(is_gameplay ? 1 : 0);
+                    rt64_wr64_set_viewport_widen(is_gameplay ? 1 : 0);
+                    // Wave-grid enlargement: the detail-water mesh is built
+                    // per frame as a rows x cols camera-facing grid whose
+                    // dimensions live in a static config block at 0x800DA8B4
+                    // ({flag, rows=19, cols=35, Vp...} — found via decomp
+                    // func_8008FB74, the wave-mesh DL builder, reading it
+                    // every frame; docs/RE-NOTES.md). Stock 19x35 covers only
+                    // the original 4:3 view; enlarge so detailed water fills
+                    // widescreen. 23x55 verified stable at full frame rate
+                    // (27x63 also fine). WR64_WAVEGRID=RxC overrides.
+                    {
+                        static uint32_t wg_rows = 23, wg_cols = 55;
+                        static bool wg_parsed = false;
+                        if (!wg_parsed) {
+                            wg_parsed = true;
+                            const char* wg = std::getenv("WR64_WAVEGRID");
+                            if (wg) {
+                                unsigned r = 0, c = 0;
+                                if (sscanf(wg, "%ux%u", &r, &c) == 2 && r >= 4 && c >= 4) {
+                                    // Clamp: huge grids risk DL/vertex-buffer overflow.
+                                    wg_rows = r > 40 ? 40 : r;
+                                    wg_cols = c > 96 ? 96 : c;
+                                }
+                            }
+                        }
+                        if (is_gameplay) {
+                            wr32g(rdram, 0x800DA8B8u, wg_rows);
+                            wr32g(rdram, 0x800DA8BCu, wg_cols);
+                        }
+                    }
+                    // Keep world projections on RT64's wide-viewport path even
+                    // while the game's camera-bob shifts its viewport (the
+                    // shifted viewport otherwise fails RT64's coverage test
+                    // mid-race and the whole scene collapses into the
+                    // original-width center band).
+                    rt64_wr64_set_wide_world(is_gameplay ? 1 : 0);
+                    static const char* sd_env = std::getenv("WR64_SCENE_DEBUG");
+                    static uint32_t sc_frames = 0;
+                    if (sd_env && sd_env[0] == '1' && (++sc_frames % 200) == 0) {
+                        fprintf(stderr, "[SCISSOR] inner-rect matches last frame: %u\n",
+                            rt64_wr64_scissor_match_count());
                     }
                 }
 
@@ -812,6 +890,44 @@ public:
                 static const char* frustum_env = std::getenv("WR64_POKE_FRUSTUM");
                 if (frustum_env && frustum_env[0] == '1') {
                     poke_frustum(app_->core.RDRAM);
+                }
+                // WR64_PEEK=addr[,addr...] (hex): every 300 updates, log 8
+                // words at each address (as u32 and float) — generic RE tool.
+                static const char* peek_env = std::getenv("WR64_PEEK");
+                if (peek_env && (update_count % 300) == 0) {
+                    const char* p = peek_env;
+                    while (*p) {
+                        uint32_t addr = (uint32_t)strtoul(p, nullptr, 16);
+                        if (addr >= 0x80000000u && addr < 0x807FFFE0u) {
+                            fprintf(stderr, "[PEEK] 0x%08X:", addr);
+                            for (int k = 0; k < 8; k++) {
+                                uint32_t w = rd32g(app_->core.RDRAM, addr + k * 4);
+                                fprintf(stderr, " %08X(%.3f)", w, bits_to_f(w));
+                            }
+                            fprintf(stderr, "\n");
+                        }
+                        const char* c = strchr(p, ',');
+                        if (!c) break;
+                        p = c + 1;
+                    }
+                }
+                // WR64_POKE_WORDS=addr:val[,addr:val...] (hex): force words
+                // every update — generic RE tool.
+                static const char* pokew_env = std::getenv("WR64_POKE_WORDS");
+                if (pokew_env) {
+                    const char* p = pokew_env;
+                    while (*p) {
+                        uint32_t addr = (uint32_t)strtoul(p, nullptr, 16);
+                        const char* colon = strchr(p, ':');
+                        if (!colon) break;
+                        uint32_t val = (uint32_t)strtoul(colon + 1, nullptr, 16);
+                        if (addr >= 0x80000000u && addr < 0x807FFFF0u) {
+                            wr32g(app_->core.RDRAM, addr, val);
+                        }
+                        const char* c = strchr(p, ',');
+                        if (!c) break;
+                        p = c + 1;
+                    }
                 }
                 // WR64_POKE_FOV=1: self-contained FOV widening experiment.
                 // Scans for camera FOV floats (45.0/75.0 — values proven live

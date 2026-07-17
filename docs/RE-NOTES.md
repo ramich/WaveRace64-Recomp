@@ -244,6 +244,93 @@ for 45.0f/75.0f floats with periodic rescan since camera structs spawn per scene
   finding the wave-grid bounds source is the single remaining hunt for
   border-free ultrawide water.
 
+## Wave-mesh "bounds" — SOLVED (2026-07-17): sub-DL scissors
+
+The entire wave-grid-bounds mystery dissolved: the wave mesh was never sized
+or culled to the inner rect at all — it is **scissored by G_SETSCISSOR
+commands issued from branched sub-DLs**, which the port's top-level DL word
+rewrite can never reach (it stops at the first G_DL). That's why the water
+boundary was a crisp screen-space rectangle, why it never moved with fovy
+(scissors don't), why no view-rect variables existed in RDRAM (bisect ruled
+them out — the values are immediates inside whatever builds the sub-DL), and
+why terrain (drawn under the top-level, rewritten scissor) filled the
+margins while water didn't.
+
+Fix (shipped): rt64 fork exports `rt64_wr64_set_scissor_widen[_mask]` — a
+filter inside `RDP::setScissor` (rt64_rdp.cpp) that catches EVERY scissor
+after segment resolution and widens inner-rect-signature ones (ul <=
+(10,22), lr >= (300,214), 10.2 fixed) to (0,0)-(320,240). The port enables
+it per frame for gameplay scenes only (menus keep original clipping), next
+to the present-crop toggle in src/rt64_render_context.cpp.
+
+**Selectivity is load-bearing:** 3 scissors match per race frame. Index 0
+belongs to a far-ocean/horizon pass that MUST stay clipped — widening it
+paints flat ocean over the terrain margins (the first widen-everything
+attempt regressed exactly that way). Indices 1-2 are the wave-mesh passes.
+`WR64_SCISSOR_MASK` (hex, default 0x6) picks which indices widen; re-bisect
+per course if other tracks order their passes differently.
+
+Result on Sunny Beach ultrawide (1920x800): sky and wave water reach much
+further toward the window edges. Remaining artifacts below.
+
+### Scissor-widening addendum (2026-07-17): what each layer does and breaks
+
+Hard-won map of the interacting layers (each verified by pixel-measuring
+zoomed screenshots — do NOT trust full-window thumbnails, the cyan bands
+blend into water):
+
+- RDP-state widening of scissor index 0 **must stay OFF** (mask default
+  0x6). Index 0's rect drives RT64's fbPair/projection aspect
+  classification; widening it collapses the whole world into an unstretched
+  centered 4:3 band (user-reported regression; "the gameplay rectangle
+  stays 4:3 and doesn't stretch"). The earlier "far-ocean overpaint" theory
+  was this same collapse, misread.
+- The per-CALL clipping that index 0 causes is instead neutralized at
+  GPU-scissor conversion time (rt64_framebuffer_renderer.cpp, gated by
+  `rt64_wr64_get_wide_world()`), where placement/aspect decisions are
+  already made. WR64_CLIP_DEBUG=1 dumps per-call clip inputs.
+- `rt64_wr64_set_wide_world` also forces scissor-covering gameplay
+  perspective projections onto the wide-viewport path so the game's
+  camera-bob viewport translation can't knock them off it mid-race.
+- The game's world viewports are ALREADY full-size (scale 160x120; verified
+  via the rt64-side setViewport trace WR64_VP_TRACE=1) — the old
+  "inner-rect RSP viewport" theory is dead; the bob is a translate.
+
+**Remaining artifact — the last boss (unsolved): the game CPU-clips its
+large world polygons (beach strip, banner cloth, shore) to its view
+rectangle** before building the DL. Evidence: with every GPU scissor
+verified full-frame (WR64_CLIP_DEBUG shows no inner-rect call scissors
+anywhere), banner/fence/beach still cut in a perfect vertical at fb x~=9 —
+the old view-rect edge, unmoved by the fovy patch. Falsified sources so
+far: all 15 in-race s16 view-rect pairs in RDRAM (poked, no effect), code
+immediates 310/218/302/198 (only the tint builder uses them), float
+immediates 310.0f/218.0f (zero hits). The clip constants live in some form
+not yet identified — likely inside the polygon-clip routine as derived or
+shifted values.
+
+## Wave-grid coverage — SOLVED (2026-07-17, via the decomp): grid dims at 0x800DA8B4
+
+With the decomp cloned (github.com/ramich/Wave-Race-64), the water pipeline
+fell out fast: `func_8008FB74` (src/game/code_43DA0.c area, chained into
+`Draw_WaterEffects`) is the wave-mesh DL builder, and it re-reads a static
+config block at **0x800DA8B4 = {flag=1, rows=19, cols=35, then fullscreen
+Vp structs (the later ones are the splitscreen viewport variants)}** every
+frame. The detail-water mesh is a rows x cols camera-facing grid — 19x35
+covers exactly the original 4:3 view, which was the visible "detail water
+rectangle" (user-screenshotted at the race start). Runtime-poking the dims
+(new generic tools: `WR64_PEEK=addr[,addr]`, `WR64_POKE_WORDS=addr:val[,..]`)
+enlarges the grid live: 21x47, 23x55, 27x63 all verified stable at full
+frame rate with detailed foam water spreading accordingly. SHIPPED: the
+port writes rows/cols each gameplay frame (default 23x55, override
+`WR64_WAVEGRID=RxC`, clamped 40x96) in src/rt64_render_context.cpp.
+
+Still open after this: the terrain/shore CPU clip above (beach strip,
+banner still cut at the old view-rect edge — conventional course geometry,
+no sibling config block found near 0x800DA8B4); water foam/sparkle
+fb-effect only covers the original fb region (RT64 structural); a thin
+bottom water strip at extreme angles (grid extent, mostly camera-dependent
+now).
+
   **Build-system trap (2026-07-16, root cause found):** builds appeared to
   "succeed" while linking stale objects — new code/log strings missing from
   the exe. NOT a cmake/ninja bug: (1) invoking `cmd /c scripts\rebuild.cmd`
