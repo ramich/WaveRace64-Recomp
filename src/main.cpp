@@ -33,6 +33,7 @@
 // WR64-specific renderer settings exposed by rt64_render_context.cpp.
 extern void wr64_set_show_borders(bool show);
 extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
+extern void wr64_set_fov_degrees(float deg);
 #endif
 
 // Pull in the recompiled function declarations and overlay tables.
@@ -451,23 +452,33 @@ int main(int argc, char* argv[]) {
     {
         recomp::config::Config& wr64_cfg = recompui::config::create_config_tab("WR64", "wr64_settings", false);
         wr64_cfg.add_bool_option("show_borders", "Show Borders",
-            "Show the original CRT-overscan black borders. Off by default: the game renders edge-to-edge with a wider camera.",
+            "Show the original CRT-overscan black borders (WR64_BORDERS=1 behavior). "
+            "Off by default: scissors and camera FOV are widened for edge-to-edge rendering.",
             false);
+        wr64_cfg.add_number_option("fov_degrees", "Field of View",
+            "Camera FOV in degrees. Default 47.75 (wider than original 45). "
+            "Higher values show more of the scene horizontally.",
+            40.0, 75.0, 0.25, 2, false, 47.75);
         wr64_cfg.add_enum_option("wave_grid", "Wave Detail Area",
-            "How far the detailed foam-water mesh extends into widescreen. Larger fills more of an ultrawide screen.",
+            "How far the detailed foam-water mesh extends into widescreen. "
+            "Larger grids fill more of an ultrawide screen at negligible cost.",
             {
-                {0u, "stock",  "Stock (19x35)"},
-                {1u, "wide",   "Wide (23x55)"},
-                {2u, "wider",  "Wider (28x70)"},
+                {0u, "stock",    "Stock (19x35)"},
+                {1u, "wide",     "Wide (23x55)"},
+                {2u, "wider",    "Wider (27x63)"},
+                {3u, "widest",   "Widest (32x78)"},
+                {4u, "maximum",  "Maximum (40x96)"},
             }, 1u);
 
         auto apply_wr64 = []() {
             recomp::config::Config& cfg = recompui::config::get_config("wr64_settings");
             wr64_set_show_borders(std::get<bool>(cfg.get_option_value("show_borders")));
-            static constexpr uint32_t rows[] = {19, 23, 28};
-            static constexpr uint32_t cols[] = {35, 55, 70};
+            float fov = static_cast<float>(std::get<double>(cfg.get_option_value("fov_degrees")));
+            wr64_set_fov_degrees(fov);
+            static constexpr uint32_t rows[] = {19, 23, 27, 32, 40};
+            static constexpr uint32_t cols[] = {35, 55, 63, 78, 96};
             uint32_t idx = std::get<uint32_t>(cfg.get_option_value("wave_grid"));
-            if (idx >= 3) idx = 1;
+            if (idx >= 5) idx = 1;
             wr64_set_wavegrid(rows[idx], cols[idx]);
         };
         wr64_cfg.set_load_callback(apply_wr64);

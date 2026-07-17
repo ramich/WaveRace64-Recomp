@@ -88,9 +88,11 @@ static std::atomic<RT64::Application*> s_app{nullptr};
 static bool     s_show_borders  = false; // false = border removal ON (default)
 static uint32_t s_wavegrid_rows = 23;    // default wide wave grid
 static uint32_t s_wavegrid_cols = 55;
+static float    s_fov_degrees   = 47.75f; // matches toml patches; 0 = don't poke
 
 void wr64_set_show_borders(bool show)                        { s_show_borders  = show; }
 void wr64_set_wavegrid(uint32_t rows, uint32_t cols)         { s_wavegrid_rows = rows; s_wavegrid_cols = cols; }
+void wr64_set_fov_degrees(float deg)                         { s_fov_degrees   = deg;  }
 
 // ---------------------------------------------------------------------------
 // GraphicsConfig → RT64 UserConfiguration helpers
@@ -986,6 +988,13 @@ public:
                         }
                     }
                 }
+            } else {
+                // Borders-on mode: reset all widescreen hooks to their
+                // default-off state, matching WR64_BORDERS=1 boot-time behavior.
+                rt64_wr64_set_scissor_widen(0);
+                rt64_wr64_set_viewport_widen(0);
+                rt64_wr64_set_wide_world(0);
+                rt64_wr64_set_present_crop43(0);
             }
         }
 
@@ -1044,6 +1053,34 @@ public:
                 if (frustum_env && frustum_env[0] == '1') {
                     poke_frustum(app_->core.RDRAM);
                 }
+
+                // Launcher FOV override: scan RDRAM periodically for camera
+                // FOV floats (45° = 0x42340000, original; 47.75° = 0x423F0000,
+                // toml-patched default) and overwrite with s_fov_degrees every
+                // gameplay update. 1-frame latency is acceptable (camera struct
+                // is re-read next game logic tick).
+                if (s_fov_degrees > 0.0f) {
+                    static std::vector<uint32_t> s_fov_addrs;
+                    static uint32_t s_fov_next_scan = 300;
+                    uint8_t* fov_rdram = app_->core.RDRAM;
+                    if (update_count >= s_fov_next_scan) {
+                        s_fov_next_scan = update_count + 600;
+                        for (uint32_t g = 0x80000010; g < 0x807FFFF0; g += 4) {
+                            uint32_t w = rd32g(fov_rdram, g);
+                            if (w != 0x42340000u && w != 0x423F0000u) continue;
+                            bool known = false;
+                            for (uint32_t a : s_fov_addrs) { if (a == g) { known = true; break; } }
+                            if (!known && s_fov_addrs.size() < 512) s_fov_addrs.push_back(g);
+                        }
+                    }
+                    uint32_t desired = f_to_bits(s_fov_degrees);
+                    for (uint32_t addr : s_fov_addrs) {
+                        uint32_t cur = rd32g(fov_rdram, addr);
+                        if ((cur == 0x42340000u || cur == 0x423F0000u || cur == desired) && cur != desired)
+                            wr32g(fov_rdram, addr, desired);
+                    }
+                }
+
                 // WR64_PEEK=addr[,addr...] (hex): every 300 updates, log 8
                 // words at each address (as u32 and float) — generic RE tool.
                 static const char* peek_env = std::getenv("WR64_PEEK");
