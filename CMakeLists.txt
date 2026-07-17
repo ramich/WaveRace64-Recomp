@@ -19,10 +19,31 @@ if (WIN32)
 endif()
 
 # =============================================================================
-# Find dependencies
+# Find / fetch SDL2 early — must happen before subdirectories that use it
+# (recompinput reads sdl2_SOURCE_DIR at configure time)
 # =============================================================================
 if (NOT WIN32)
     find_package(SDL2 REQUIRED)
+else()
+    include(FetchContent)
+
+    if (DEFINED ENV{SDL2_VERSION})
+        set(SDL2_VERSION $ENV{SDL2_VERSION})
+    else()
+        set(SDL2_VERSION "2.30.3")
+    endif()
+
+    FetchContent_Declare(
+        sdl2
+        URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip
+    )
+    FetchContent_MakeAvailable(sdl2)
+
+    # Mirror SDL2 headers into an SDL2/ subdirectory so both <SDL.h> and
+    # <SDL2/SDL.h> include styles resolve.
+    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sdl2-compat-include/SDL2)
+    file(GLOB SDL2_COMPAT_HEADERS ${sdl2_SOURCE_DIR}/include/*.h)
+    file(COPY ${SDL2_COMPAT_HEADERS} DESTINATION ${CMAKE_BINARY_DIR}/sdl2-compat-include/SDL2)
 endif()
 
 # =============================================================================
@@ -38,6 +59,55 @@ endif()
 # N64ModernRuntime (ultramodern + librecomp)
 # =============================================================================
 add_subdirectory(lib/N64ModernRuntime EXCLUDE_FROM_ALL)
+
+# =============================================================================
+# RecompFrontend (optional launcher UI — submodule at lib/RecompFrontend)
+# =============================================================================
+set(RECOMP_FRONTEND_PATH "" CACHE PATH "Path to RecompFrontend repository")
+if (NOT RECOMP_FRONTEND_PATH)
+    set(_builtin_rf "${CMAKE_CURRENT_SOURCE_DIR}/lib/RecompFrontend")
+    if (EXISTS "${_builtin_rf}/CMakeLists.txt")
+        set(RECOMP_FRONTEND_PATH "${_builtin_rf}" CACHE PATH "Path to RecompFrontend repository" FORCE)
+    endif()
+endif()
+
+# Re-export RT64 shader-compiler variables into the parent scope so that
+# subdirectories added after lib/rt64 (e.g. RecompFrontend) can see them.
+# CMake normal variables set inside add_subdirectory do NOT propagate back.
+if (BUILD_RT64)
+    set(_rt64_src "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64/src")
+    if (WIN32)
+        set(DXC "${_rt64_src}/contrib/dxc/bin/x64/dxc.exe")
+    elseif (APPLE)
+        if (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+            set(DXC "${_rt64_src}/contrib/dxc/bin/arm64/dxc-macos")
+        else()
+            set(DXC "${_rt64_src}/contrib/dxc/bin/x64/dxc-macos")
+        endif()
+    else()
+        if (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+            set(DXC "${_rt64_src}/contrib/dxc/bin/arm64/dxc-linux")
+        else()
+            set(DXC "${_rt64_src}/contrib/dxc/bin/x64/dxc-linux")
+        endif()
+    endif()
+    set(DXC_COMMON_OPTS "-I${_rt64_src}")
+    set(DXC_DXIL_OPTS   "-Wno-ignored-attributes")
+    set(DXC_SPV_OPTS    "-spirv" "-fspv-target-env=vulkan1.0" "-fvk-use-dx-layout")
+    set(DXC_VS_OPTS     ${DXC_COMMON_OPTS} "-E" "VSMain" "-T" "vs_6_3" "-fvk-invert-y")
+    set(DXC_PS_OPTS     ${DXC_COMMON_OPTS} "-E" "PSMain" "-T" "ps_6_3")
+    set(DXC_CS_OPTS     ${DXC_COMMON_OPTS} "-E" "CSMain" "-T" "cs_6_3")
+    set(DXC_GS_OPTS     ${DXC_COMMON_OPTS} "-E" "GSMain" "-T" "gs_6_3")
+endif()
+
+if (RECOMP_FRONTEND_PATH)
+    message(STATUS "RecompFrontend: ${RECOMP_FRONTEND_PATH}")
+    set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH "${CMAKE_CURRENT_SOURCE_DIR}/lib/N64ModernRuntime" CACHE PATH "" FORCE)
+    set(RECOMP_FRONTEND_RT64_PATH "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64" CACHE PATH "" FORCE)
+    add_subdirectory(${RECOMP_FRONTEND_PATH} ${CMAKE_BINARY_DIR}/recompfrontend EXCLUDE_FROM_ALL)
+else()
+    message(STATUS "RecompFrontend: not found (set RECOMP_FRONTEND_PATH to enable launcher UI)")
+endif()
 
 # =============================================================================
 # Recompiled functions — static library from N64Recomp output
@@ -154,6 +224,15 @@ if (BUILD_RT64)
     target_compile_definitions(WaveRace64Recomp PRIVATE HAS_RT64=1 HLSL_CPU FFX_GCC)
 endif()
 
+if (RECOMP_FRONTEND_PATH)
+    target_compile_definitions(WaveRace64Recomp PRIVATE HAS_RECOMPUI=1)
+    target_include_directories(WaveRace64Recomp PRIVATE
+        "${RECOMP_FRONTEND_PATH}/recompui/include"
+        "${RECOMP_FRONTEND_PATH}/recompinput/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64/src/contrib/nativefiledialog-extended/src/include"
+    )
+endif()
+
 # Link libraries
 # Use --start-group/--end-group to handle circular dependencies between
 # recomp_funcs (which references librecomp symbols) and librecomp (which
@@ -166,6 +245,9 @@ if (MSVC)
         librecomp
         ultramodern
     )
+    if (RECOMP_FRONTEND_PATH)
+        target_link_libraries(WaveRace64Recomp PRIVATE recompui recompinput)
+    endif()
     # Allow multiple definitions (e.g. guMtxF2L appears in multiple overlay sections)
     target_link_options(WaveRace64Recomp PRIVATE /FORCE:MULTIPLE)
 else()
@@ -178,34 +260,28 @@ else()
         -Wl,--end-group
         SDL2::SDL2
     )
+    if (RECOMP_FRONTEND_PATH)
+        target_link_libraries(WaveRace64Recomp PRIVATE recompui recompinput)
+    endif()
     # Allow multiple definitions (e.g. guMtxF2L appears in multiple overlay sections)
     target_link_options(WaveRace64Recomp PRIVATE -Wl,--allow-multiple-definition)
 endif()
 
+# Copy assets/ to the build output directory so the launcher can find fonts/rcss.
+if (RECOMP_FRONTEND_PATH)
+    add_custom_command(TARGET WaveRace64Recomp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:WaveRace64Recomp>/assets"
+        COMMENT "Copying launcher assets"
+    )
+endif()
+
 # =============================================================================
-# Windows: fetch SDL2 (VC devel package) and copy runtime DLLs
+# Windows: SDL2 target configuration and DLL copy
+# (FetchContent was called early above; target-specific calls go here)
 # =============================================================================
 if (WIN32)
-    include(FetchContent)
-
-    if (DEFINED ENV{SDL2_VERSION})
-        set(SDL2_VERSION $ENV{SDL2_VERSION})
-    else()
-        set(SDL2_VERSION "2.30.3")
-    endif()
-
-    FetchContent_Declare(
-        sdl2
-        URL https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-devel-${SDL2_VERSION}-VC.zip
-    )
-    FetchContent_MakeAvailable(sdl2)
-
-    # The SDL2 VC devel package puts headers in include/ directly, but the
-    # sources include <SDL2/SDL.h> (Linux layout). Mirror them into an SDL2/
-    # subdirectory so both layouts resolve.
-    file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/sdl2-compat-include/SDL2)
-    file(GLOB SDL2_COMPAT_HEADERS ${sdl2_SOURCE_DIR}/include/*.h)
-    file(COPY ${SDL2_COMPAT_HEADERS} DESTINATION ${CMAKE_BINARY_DIR}/sdl2-compat-include/SDL2)
     target_include_directories(WaveRace64Recomp PRIVATE
         ${sdl2_SOURCE_DIR}/include
         ${CMAKE_BINARY_DIR}/sdl2-compat-include

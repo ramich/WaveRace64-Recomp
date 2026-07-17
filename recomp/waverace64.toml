@@ -82,3 +82,13 @@ value = 0x3C01423F # lui $at, 0x423F (47.75f, was 45.0f)
 func = "func_800A52D8"
 vram = 0x800A54E4
 value = 0x3C01423F # lui $at, 0x423F (47.75f, was 45.0f)
+
+# TEMP: lock course-world sector index to N for neighbor-sector diagnosis.
+# 0x8006F110 is "mfc1 $a2, $f4" (move trunc'd sector float → r6);
+# replace with "addiu $a2, $zero, N" (0x24060000 | N).
+# Remove before committing.
+# [[patches.instruction]]
+# func = "func_8006E674"
+# vram = 0x8006F110
+# value = 0x24060009 # addiu $a2, $zero, 9 — lock to sector 9 (≈180°)
+

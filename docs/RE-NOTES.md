@@ -308,6 +308,74 @@ immediates 310.0f/218.0f (zero hits). The clip constants live in some form
 not yet identified — likely inside the polygon-clip routine as derived or
 shifted values.
 
+**Shore/banner hunt, round 2 (2026-07-17 pm — negatives + system map):**
+- View-rect 4-TUPLES don't exist in RDRAM either (new poke scan mode 6:
+  s16[4]/s32[4]/f32[4], both orderings, all rect flavors — zero hits
+  in-race). The bounds are definitively code-derived.
+- WR64_CLIP_DEBUG=2 (log EVERY call whose scissor ulx==32): ZERO hits in a
+  full race — confirms no RT64-visible draw call is scissored to the inner
+  rect; the geometry itself ends at fb x~=9. Under widen-all the same
+  endpoint maps to the squeezed band edge (~460px) — same fb-space limit,
+  different mapping, so it is content generation, not GPU clipping.
+- Frame composition mapped (decomp func_8009328C, 1P):
+  func_8008FB74 (waves) -> func_8006E674 -> func_800687A4 -> func_8007FFA8
+  -> func_800ADF90 (course OBJECTS) -> Draw_WaterEffects -> func_80069594
+  -> func_80068538 -> configSignalRectangle -> func_800B305C ->
+  func_8008BD2C. The banner/fence/beach-people are drawn by one of these;
+  buoys/objects by func_800ADF90.
+- **Object system found (decomp code_52CD0.c):** func_800ADF90 iterates 30
+  object slots with per-type draw dispatch; func_800ADE14 is the
+  visibility test — an ANGLE cull `fabs(normalize(angleToObj - camYaw)) <
+  100.0f`, threshold constant at **0x800ADF54** (`lui $at, 0x42C8`),
+  instruction-patchable. A 160.0 test build raced fine but the A/B was
+  inconclusive (start-line screenshots landed in the race-entry fade) —
+  redo with a proper capture; note 100 units are probably NOT degrees of
+  half-FOV, so this may only matter for behind-camera pop.
+- The old "0x43C1=386.0 focal" lead (386.27 = 160/tan(22.5)!) at
+  0x80082A68 in func_80081CC8 sits in a 236.0 < v < 386.0 range check;
+  widening both constants (100/500) had NO visual effect on the shore cut —
+  not the clamp (or not the relevant instance).
+- NEXT: identify which composition pass draws banner/fence/beach (RT64 F1
+  inspector draw-call debugger is the right tool — WR64_DEV=1, click the
+  geometry; or bisect passes by stubbing func_8006E674 / func_800687A4 /
+  func_8007FFA8 one at a time via instruction patches jr-ra), then read
+  that builder for its generation bounds, wave-grid style.
+
+**Pass identification by stubbing (2026-07-17 pm, jr-ra instruction patches
++ one race each; drive_stub_*/ dirs):**
+
+| pass (1P chain order) | stub result -> role |
+|---|---|
+| func_8008FB74 | wave mesh (known) |
+| func_8006E674 | **course world**: menus hang at course select with the preview map's center black — draws terrain/shore/banner/fence/people AND the course preview. Race can't start without it |
+| func_800687A4 | rider/jet-ski GONE -> player renderer |
+| func_8007FFA8 | no obvious change in race frame (post-effects?) |
+| func_800ADF90 | course OBJECTS (ramps/signs; angle cull func_800ADE14 @100.0f, const at 0x800ADF54) |
+| func_80069594 | no obvious change |
+| func_80068538 | **R buoy GONE -> the buoy renderer** (buoys are NOT func_800ADF90 objects; their pop-in cull lives in here — unexplored) |
+| func_800B305C / func_8008BD2C | subtle marker/prim-color changes only |
+
+**THE ARCHITECTURAL ANSWER — 18-sector precomputed visibility (PVS):**
+inside func_8006E674 (funcs_3.c ~line 5655 / vram 0x8006F0D0-0x8006F19C):
+`sector = clamp(trunc(viewAngle / 360 * 18), 0..17)` — the camera yaw picks
+one of **18 x 20-degree sectors**, then a mirrored branch (sector >= 10 ->
+sector = 18 - sector) selects a set of segment-1 COURSE DATA pointers
+(0x0102CC58/CC70/CD90/CD78 vs 0x0102CCE8/CD00/CE20 on Sunny Beach) — i.e.
+**per-view-angle prebaked DL/vertex sets**. The world content for each view
+direction was authored/cooked offline for the original 45-deg 4:3 view.
+There IS no clip constant to widen: geometry beyond the old view edge
+simply is not in the selected sector's data — it lives in the NEIGHBOR
+sector's set. This explains every stubborn symptom: fovy-independent
+culling, no rect values anywhere in RDRAM or code, the crisp screen-space
+cut (sector content ends where the next sector's begins), buoys popping
+(their renderer likely does its own angle test against the same sector
+math or the 100-deg object cull).
+FIX DIRECTIONS: (a) emit the current sector's AND a neighbor's DL sets
+(patch the selection at 0x8006F13C/0x8006F16C to also draw adjacent sector
+data — overdraw/z risk, needs experiment); (b) buoys separately: find the
+angle cull inside func_80068538 (fresh, likely a single constant like the
+object cull's 100.0f); (c) accept as structural like the foam.
+
 ## Wave-grid coverage — SOLVED (2026-07-17, via the decomp): grid dims at 0x800DA8B4
 
 With the decomp cloned (github.com/ramich/Wave-Race-64), the water pipeline

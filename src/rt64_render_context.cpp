@@ -21,6 +21,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <atomic>
 #include <vector>
 
@@ -30,6 +31,10 @@
 #include "ultramodern/config.hpp"
 
 #include "hle/rt64_application.h"
+
+#ifdef HAS_RECOMPUI
+#include "recompui/recompui.h"
+#endif
 
 // Exported by lib/rt64 rt64_rsp.cpp (WR64 patch): segment-3 projections that
 // geometry was actually drawn under, split into live-world cameras vs the
@@ -75,6 +80,73 @@ static void dummy_check_interrupts() {}
 
 // Live application pointer for event forwarding (single renderer instance).
 static std::atomic<RT64::Application*> s_app{nullptr};
+
+// ---------------------------------------------------------------------------
+// GraphicsConfig → RT64 UserConfiguration helpers
+// ---------------------------------------------------------------------------
+
+static RT64::UserConfiguration::RefreshRate to_rt64_rr(ultramodern::renderer::RefreshRate opt) {
+    switch (opt) {
+        case ultramodern::renderer::RefreshRate::Original: return RT64::UserConfiguration::RefreshRate::Original;
+        case ultramodern::renderer::RefreshRate::Display:  return RT64::UserConfiguration::RefreshRate::Display;
+        case ultramodern::renderer::RefreshRate::Manual:   return RT64::UserConfiguration::RefreshRate::Manual;
+        default:                                           return RT64::UserConfiguration::RefreshRate::Display;
+    }
+}
+
+static RT64::UserConfiguration::Antialiasing to_rt64_aa(ultramodern::renderer::Antialiasing opt) {
+    switch (opt) {
+        case ultramodern::renderer::Antialiasing::MSAA2X: return RT64::UserConfiguration::Antialiasing::MSAA2X;
+        case ultramodern::renderer::Antialiasing::MSAA4X: return RT64::UserConfiguration::Antialiasing::MSAA4X;
+        case ultramodern::renderer::Antialiasing::MSAA8X: return RT64::UserConfiguration::Antialiasing::MSAA8X;
+        default:                                          return RT64::UserConfiguration::Antialiasing::None;
+    }
+}
+
+static RT64::UserConfiguration::InternalColorFormat to_rt64_hpfb(ultramodern::renderer::HighPrecisionFramebuffer opt) {
+    switch (opt) {
+        case ultramodern::renderer::HighPrecisionFramebuffer::On:   return RT64::UserConfiguration::InternalColorFormat::High;
+        case ultramodern::renderer::HighPrecisionFramebuffer::Auto: return RT64::UserConfiguration::InternalColorFormat::Automatic;
+        default:                                                     return RT64::UserConfiguration::InternalColorFormat::Standard;
+    }
+}
+
+// Apply launcher GraphicsConfig to RT64's UserConfiguration.
+// NOTE: aspectRatio is intentionally not forwarded here — WR64 permanently
+// uses AspectRatio::Expand (set at construction) per the scene-aspect design.
+static void apply_graphics_config_to_rt64(RT64::Application* app,
+                                           const ultramodern::renderer::GraphicsConfig& cfg) {
+    // Resolution / downsampling
+    switch (cfg.res_option) {
+        default:
+        case ultramodern::renderer::Resolution::Auto:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::WindowIntegerScale;
+            app->userConfig.downsampleMultiplier = 1;
+            break;
+        case ultramodern::renderer::Resolution::Original:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+        case ultramodern::renderer::Resolution::Original2x:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = 2.0f * std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+    }
+
+    // Refresh rate / framerate cap
+    app->userConfig.refreshRate = to_rt64_rr(cfg.rr_option);
+    app->userConfig.refreshRateTarget = cfg.rr_manual_value;
+
+    // Anti-aliasing
+    app->userConfig.antialiasing = to_rt64_aa(cfg.msaa_option);
+
+    // High-precision framebuffer
+    app->userConfig.internalColorFormat = to_rt64_hpfb(cfg.hpfb_option);
+
+    app->userConfig.displayBuffering = RT64::UserConfiguration::DisplayBuffering::Triple;
+}
 
 // ---------------------------------------------------------------------------
 // Culling-bounds bisection harness (RE tooling, env-driven; see
@@ -190,6 +262,43 @@ static void poke_scan(uint8_t* rdram, int mode) {
                 for (int k = -2; k < 6; k++)
                     fprintf(f, "%d ", (int16_t)rd16g(rdram, g + k * 2));
                 fprintf(f, "\n");
+                count++;
+            }
+        }
+    } else if (mode == 6) {
+        // View-rect 4-TUPLES: the shore/banner/fence/buoy screen-space clip
+        // compares against the full view rect, which mode 1 (adjacent pairs)
+        // could not find. Match {x0,y0,x1,y1} or {x0,x1,y0,y1} orderings in
+        // both s16[4] and s32[4] layouts, with the known rect flavors:
+        // x0=8, y0 in {12,20}, x1 in {310,311,312}, y1 in {218,219,224,228}.
+        auto is_x1 = [](int v) { return v >= 310 && v <= 312; };
+        auto is_y1 = [](int v) { return v == 218 || v == 219 || v == 224 || v == 228; };
+        auto is_y0 = [](int v) { return v == 12 || v == 20; };
+        for (uint32_t g = 0x80000010; g < 0x807FFFE0 && count < 4096; g += 2) {
+            int a = (int16_t)rd16g(rdram, g), b = (int16_t)rd16g(rdram, g + 2);
+            int c = (int16_t)rd16g(rdram, g + 4), d = (int16_t)rd16g(rdram, g + 6);
+            if (a == 8 && ((is_y0(b) && is_x1(c) && is_y1(d)) ||
+                           (is_x1(b) && is_y0(c) && is_y1(d)))) {
+                fprintf(f, "R16 0x%08X %d %d %d %d\n", g, a, b, c, d);
+                count++;
+            }
+        }
+        for (uint32_t g = 0x80000010; g < 0x807FFFD0 && count < 4096; g += 4) {
+            int32_t a = (int32_t)rd32g(rdram, g), b = (int32_t)rd32g(rdram, g + 4);
+            int32_t c = (int32_t)rd32g(rdram, g + 8), d = (int32_t)rd32g(rdram, g + 12);
+            if (a == 8 && ((is_y0(b) && is_x1(c) && is_y1(d)) ||
+                           (is_x1(b) && is_y0(c) && is_y1(d)))) {
+                fprintf(f, "R32 0x%08X %d %d %d %d\n", g, (int)a, (int)b, (int)c, (int)d);
+                count++;
+            }
+        }
+        // Float rect variants (8.0f, 310.0f, ...).
+        for (uint32_t g = 0x80000010; g < 0x807FFFD0 && count < 4096; g += 4) {
+            float a = bits_to_f(rd32g(rdram, g)), b = bits_to_f(rd32g(rdram, g + 4));
+            float c = bits_to_f(rd32g(rdram, g + 8)), d = bits_to_f(rd32g(rdram, g + 12));
+            if (a == 8.0f && ((is_y0((int)b) && is_x1((int)c) && is_y1((int)d) && b == (int)b && c == (int)c && d == (int)d) ||
+                              (is_x1((int)b) && is_y0((int)c) && is_y1((int)d) && b == (int)b && c == (int)c && d == (int)d))) {
+                fprintf(f, "RF 0x%08X %.0f %.0f %.0f %.0f\n", g, a, b, c, d);
                 count++;
             }
         }
@@ -353,6 +462,12 @@ namespace wr64 {
 class RT64Context : public ultramodern::renderer::RendererContext {
 public:
     RT64Context(uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
+#ifdef HAS_RECOMPUI
+        // Register RmlUi render hooks with RT64 before the application is set up.
+        // The hooks fire during RT64's present pipeline to draw the launcher UI.
+        recompui::set_render_hooks();
+#endif
+
         // Populate the RT64 core struct from the emulated hardware state.
         RT64::Application::Core core{};
 
@@ -420,22 +535,22 @@ public:
         // Create the RT64 application.
         app_ = std::make_unique<RT64::Application>(core, app_config);
 
+        // Apply launcher graphics settings (framerate cap, resolution, MSAA, etc.).
+        apply_graphics_config_to_rt64(app_.get(), ultramodern::renderer::get_graphics_config());
+
         // Enable developer/debug mode if requested.
         app_->userConfig.developerMode = developer_mode;
 
-        // Widescreen: expand the 3D aspect ratio to fill the window (same
-        // mechanism Zelda64Recomp uses). Known limitation without game patches:
-        // objects can pop in at the screen edges because the game culls against
-        // the original 4:3 frustum. Set WR64_WIDESCREEN=0 to force 4:3.
+        // WR64: always use Expand aspect ratio (scene-aspect design — menus are
+        // pillarboxed by VI-blit scissoring, not by changing this at runtime).
+        // WR64_WIDESCREEN=0 reverts to the N64's original 4:3 for testing.
         const char* ws_env = std::getenv("WR64_WIDESCREEN");
         if (!(ws_env && ws_env[0] == '0')) {
             app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Expand;
         }
 
-        // Experimental high-FPS: present at the display's refresh rate and let
-        // RT64 interpolate transforms between the game's native 20 Hz frames
-        // (the Zelda64Recomp approach; no 60fps GameShark code ever existed
-        // for this game — its logic rate is hard-coded). WR64_HIGHFPS=1.
+        // WR64_HIGHFPS=1 forces display-rate presentation even if the launcher
+        // config is set to Original (backwards-compat env var override).
         const char* highfps_env = std::getenv("WR64_HIGHFPS");
         if (highfps_env && highfps_env[0] == '1') {
             app_->userConfig.refreshRate = RT64::UserConfiguration::RefreshRate::Display;
@@ -501,9 +616,29 @@ public:
 
     bool update_config(const ultramodern::renderer::GraphicsConfig& old_config,
                        const ultramodern::renderer::GraphicsConfig& new_config) override {
-        // TODO: Map GraphicsConfig fields to RT64's UserConfiguration and apply changes.
-        (void)old_config;
-        (void)new_config;
+        if (!app_ || old_config == new_config) return false;
+
+        if (new_config.wm_option != old_config.wm_option) {
+            app_->setFullScreen(new_config.wm_option == ultramodern::renderer::WindowMode::Fullscreen);
+        }
+
+        apply_graphics_config_to_rt64(app_.get(), new_config);
+
+        // Re-apply WR64 aspect ratio override so a launcher change can't break widescreen.
+        const char* ws_env = std::getenv("WR64_WIDESCREEN");
+        if (!(ws_env && ws_env[0] == '0')) {
+            app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Expand;
+        }
+
+        bool res_changed  = new_config.res_option  != old_config.res_option;
+        bool ar_changed   = new_config.ar_option   != old_config.ar_option;
+        bool ds_changed   = new_config.ds_option   != old_config.ds_option;
+        bool msaa_changed = new_config.msaa_option != old_config.msaa_option;
+        app_->updateUserConfig(res_changed || ar_changed || ds_changed || msaa_changed);
+
+        if (msaa_changed) {
+            app_->updateMultisampling();
+        }
         return true;
     }
 
@@ -859,6 +994,11 @@ public:
         );
 
         s_frame_count.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void send_dummy_workload(uint32_t /*fb_address*/) override {
+        // Called when the VI fires but no RSP task is queued (launcher phase).
+        // RT64's render hooks fire during updateScreen(), so nothing needed here.
     }
 
     void update_screen() override {

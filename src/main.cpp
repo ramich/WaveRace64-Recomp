@@ -24,6 +24,13 @@
 #include "audio.h"
 #include "input.h"
 
+#ifdef HAS_RECOMPUI
+#include "recompui/recompui.h"
+#include "recompui/program_config.h"
+#include "recompui/config.h"
+#include "nfd.h"
+#endif
+
 // Pull in the recompiled function declarations and overlay tables.
 #include "recomp_overlays.inl"
 
@@ -140,7 +147,12 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 
 #include "register_patches.h"
 
-static SDL_Window* sdl_window = nullptr;
+// Must be non-static so recompui can reference it for window-size queries.
+SDL_Window* window = nullptr;
+
+// Required by RecompFrontend's ui_launcher.cpp (used only when no custom
+// launcher_init_callback is registered; we register our own so this stays empty).
+std::vector<recomp::GameEntry> supported_games;
 
 static void* create_gfx() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -177,22 +189,22 @@ static ultramodern::renderer::WindowHandle create_window(void* /*gfx_data*/) {
         if (win_h > max_h) { win_h = max_h; win_w = win_h * 4 / 3; }
         if (win_w > max_w) { win_w = max_w; win_h = win_w * 3 / 4; }
     }
-    sdl_window = SDL_CreateWindow(
+    window = SDL_CreateWindow(
         "Wave Race 64",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         win_w, win_h,
         window_flags
     );
-    if (!sdl_window) {
+    if (!window) {
         fprintf(stderr, "[WR64] SDL_CreateWindow failed: %s\n", SDL_GetError());
     }
 #ifdef _WIN32
     SDL_SysWMinfo wmInfo;
     SDL_VERSION(&wmInfo.version);
-    SDL_GetWindowWMInfo(sdl_window, &wmInfo);
+    SDL_GetWindowWMInfo(window, &wmInfo);
     return ultramodern::renderer::WindowHandle{ wmInfo.info.win.window, GetCurrentThreadId() };
 #else
-    return sdl_window;
+    return window;
 #endif
 }
 
@@ -203,14 +215,22 @@ static void update_gfx(void* /*gfx_data*/) {
         if (wr64::rt64_handle_sdl_event(&event)) {
             continue;
         }
+
+#ifdef HAS_RECOMPUI
+        // Forward every event to the UI system for RmlUi processing.
+        recompui::queue_event(event);
+#endif
+
         switch (event.type) {
             case SDL_QUIT:
                 ultramodern::quit();
                 break;
             case SDL_KEYDOWN:
+#ifndef HAS_RECOMPUI
                 if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
                     ultramodern::quit();
                 }
+#endif
                 break;
             default:
                 break;
@@ -221,16 +241,16 @@ static void update_gfx(void* /*gfx_data*/) {
     // (can happen with DPI/multi-monitor centering and post-setup resizes),
     // pull it back into view. Checked ~2s in so RT64's setup has settled.
     static uint32_t position_check_ticks = 0;
-    if (position_check_ticks != UINT32_MAX && sdl_window != nullptr) {
+    if (position_check_ticks != UINT32_MAX && window != nullptr) {
         uint32_t now_ticks = SDL_GetTicks();
         if (position_check_ticks == 0) {
             position_check_ticks = now_ticks;
         } else if (now_ticks - position_check_ticks > 2000) {
             position_check_ticks = UINT32_MAX;
             int x = 0, y = 0;
-            SDL_GetWindowPosition(sdl_window, &x, &y);
+            SDL_GetWindowPosition(window, &x, &y);
             if (y < 0 || x < -100) {
-                SDL_SetWindowPosition(sdl_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+                SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
             }
         }
     }
@@ -240,11 +260,11 @@ static void update_gfx(void* /*gfx_data*/) {
     uint32_t now = SDL_GetTicks();
     if (now - last_ticks >= 1000) {
         uint32_t frames = wr64::rt64_consume_frame_count();
-        if (last_ticks != 0 && sdl_window != nullptr) {
+        if (last_ticks != 0 && window != nullptr) {
             char title[64];
             SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS",
                          frames * 1000.0f / (now - last_ticks));
-            SDL_SetWindowTitle(sdl_window, title);
+            SDL_SetWindowTitle(window, title);
         }
         last_ticks = now;
     }
@@ -258,12 +278,9 @@ static void vi_callback() {
 }
 
 static void gfx_init_callback() {
-    // Called when the graphics subsystem is fully initialized.
-    // We launch a detached thread that waits for the VI thread to complete
-    // several dummy-VI iterations (populating both ViState slots) before
-    // calling start_game(). Calling start_game() immediately here would race
-    // with the VI thread: update_vi() dereferences next_state->mode which is
-    // null until set_dummy_vi() has run at least once in the VI thread.
+#ifndef HAS_RECOMPUI
+    // Without the launcher UI, auto-start the game after the VI thread has
+    // populated both ViState slots (set_dummy_vi runs at least once first).
     std::thread([]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         std::u8string game_id = u8"waverace64";
@@ -274,6 +291,9 @@ static void gfx_init_callback() {
             fprintf(stderr, "[WR64] ERROR: ROM not valid at startup (check waverace64.z64 in CWD)\n");
         }
     }).detach();
+#endif
+    // With HAS_RECOMPUI: draw_hook shows the launcher automatically on the
+    // first frame when no context is shown and the game hasn't started.
 }
 
 // ---------------------------------------------------------------------------
@@ -281,8 +301,8 @@ static void gfx_init_callback() {
 // ---------------------------------------------------------------------------
 static void error_message_box(const char* msg) {
     fprintf(stderr, "[WR64] ERROR: %s\n", msg);
-    if (sdl_window) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Wave Race 64 - Error", msg, sdl_window);
+    if (window) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Wave Race 64 - Error", msg, window);
     }
 }
 
@@ -335,6 +355,7 @@ int main(int argc, char* argv[]) {
     recomp::GameEntry wr64_entry {
         .rom_hash            = WR64_ROM_HASH,
         .internal_name       = WR64_INTERNAL_NAME,
+        .display_name        = "Wave Race 64",
         .game_id             = u8"waverace64",
         .mod_game_id         = "waverace64",
         .save_type           = recomp::SaveType::Eep4k,
@@ -355,7 +376,7 @@ int main(int argc, char* argv[]) {
     // 3. Build the Configuration and start
     // -----------------------------------------------------------------------
     recomp::Configuration config {
-        .project_version = { .major = 0, .minor = 1, .patch = 0, .suffix = "-alpha" },
+        .project_version = recomp::Version(0, 1, 0, "-alpha"),
 
         .window_handle = ultramodern::renderer::WindowHandle{},
 
@@ -407,12 +428,43 @@ int main(int argc, char* argv[]) {
     printf("[WR64] Starting recomp runtime...\n");
     // Anchor config path to CWD so saves, mods, and ROM cache resolve correctly.
     recomp::register_config_path(std::filesystem::current_path());
+
+#ifdef HAS_RECOMPUI
+    NFD_Init();
+
+    recompui::programconfig::set_program_name("Wave Race 64");
+    recompui::programconfig::set_program_id(u8"waverace64");
+    recompui::register_primary_font("LatoLatin-Regular.ttf", "LatoLatin");
+
+    // Create standard config tabs before finalize (required by RecompFrontend).
+    recompui::config::create_general_tab({});
+    recompui::config::create_graphics_tab();
+    recompui::config::create_controls_tab();
+    recompui::config::create_sound_tab();
+    recompui::config::create_mods_tab();
+    recompui::config::finalize();
+
+    recompui::register_launcher_init_callback([](recompui::LauncherMenu* menu) {
+        auto* options = menu->init_game_options_menu(
+            u8"waverace64",
+            "waverace64",
+            "Wave Race 64",
+            {},
+            recompui::GameOptionsMenuLayout::Center
+        );
+        options->add_default_options();
+    });
+#endif
+
     recomp::start(config);
 
     // Cleanup
-    if (sdl_window) {
-        SDL_DestroyWindow(sdl_window);
-        sdl_window = nullptr;
+#ifdef HAS_RECOMPUI
+    NFD_Quit();
+#endif
+    if (window) {
+        SDL_DestroyWindow(window);
+        window = nullptr;
     }
     SDL_Quit();
 

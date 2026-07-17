@@ -39,7 +39,7 @@ process left behind.
 | **Phase 4** | Build & Link (RT64 + Runtime) | **COMPLETE** |
 | **Phase 5** | Audio & Input | **COMPLETE** -- input verified by hand, audio via recompiled RSP microcode at 32 kHz |
 | **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode, menus, and races stable (races exercised extensively by the automated race driver, `scripts/drive_to_race.ps1`) |
-| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand), per-scene 4:3 menus, camera FOV widened via shipped instruction patches, FPS counter, dev inspector |
+| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand), per-scene 4:3 menus, camera FOV widened via shipped instruction patches, FPS counter, dev inspector, RecompFrontend launcher UI (graphics/audio/controls config, mod support) |
 | **Phase 8** | Release Preparation | Not Started |
 
 > **Playable.** The game boots, menus respond to keyboard/controller, races run
@@ -54,7 +54,7 @@ process left behind.
 | **Executable** | `build/WaveRace64Recomp` (Linux ELF) / `build\WaveRace64Recomp.exe` (Windows, ~8 MB) |
 | **Build system** | CMake + Ninja |
 | **Platforms** | Windows 11 x64 (clang-cl + MSVC environment, D3D12/Vulkan) -- verified; Linux x86_64 (Vulkan/SDL2) -- builds, unverified since Windows changes |
-| **Dependencies linked** | RT64, N64ModernRuntime (ultramodern), recompiled funcs |
+| **Dependencies linked** | RT64, N64ModernRuntime (ultramodern), RecompFrontend (recompui + recompinput), recompiled funcs |
 | **Link strategy** | `--start-group`/`--end-group` on GNU linkers; `/FORCE:MULTIPLE` on MSVC-style linkers |
 
 ### Known Limitations
@@ -65,7 +65,7 @@ process left behind.
 - **Controller Pak:** Stub functions only (osPfs*)
 - **Symbol map:** JAL-scan derived; indirect-call targets are still being discovered
   during play-testing (automated fix loop: `scripts/bringup_loop.ps1`)
-- **No settings UI yet** (settings via environment variables, see below)
+- **Settings UI**: RecompFrontend launcher (graphics, audio, controls, mods) is integrated; most display settings (resolution, MSAA, framerate, fullscreen) are configurable via the launcher. Environment variables below remain as overrides/fallbacks for features not yet wired to the UI (borders, wave grid, widescreen toggle, dev tools)
 - **Widescreen rough edges** (needs game patches): objects can pop in at the screen
   edges because the game culls against its original frustum — confirmed NOT to
   follow the camera FOV. HUD/menu handling is solved (per-scene presentation below)
@@ -99,7 +99,7 @@ process left behind.
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
 
 Keyboard: WASD = stick, X = A, Z = B, LShift = Z, Return = START, arrows = D-pad,
-Q/E = L/R, IJKL = C-buttons, Esc = quit. Game controllers map automatically; the
+Q/E = L/R, IJKL = C-buttons, Esc = open settings menu (during gameplay; settings menu has a quit option). Game controllers map automatically; the
 window title shows the game FPS.
 
 ### RT64 developer tools
