@@ -699,3 +699,41 @@ function (module "unknown"); a minidump/stack-trace crash handler
 stack. Not a full-machine save-state candidate — recomps run native across real
 threads, so emulator-style save states aren't feasible (RDRAM+context snapshot at
 a frame boundary is a research project, not a quick add).
+
+## HD texture replacement (RT64 packs) — wired 2026-07-18
+
+RT64 has a first-class texture-replacement system (TextureCache + replacementMap,
+F4 toggles `textureMap.replacementMapEnabled`). It was inert in the port because
+`useConfigurationFile=false` left no data dir and no pack was ever loaded. Now
+driven by the launcher **Textures** tab + `WR64_TEXPACK`/`WR64_TEXDUMP`.
+
+- **Load a pack:** `textureCache->loadReplacementDirectory(ReplacementDirectory(dir))`
+  + `replacementMapEnabled=true`. A pack dir = `rt64.json` (ReplacementDatabase)
+  + image files. DB top-level keys: `configuration`, `textures`, `operationFilters`,
+  `shiftFilters`, `extraFiles`. `configuration` = {configurationVersion:3,
+  autoPath:"rt64"|"rice", defaultOperation:"stream", defaultShift:"half",
+  hashVersion:5}. A texture entry = {path, hashes:{rt64,rice}, operation, shift}.
+  `autoPath:"rt64"` auto-matches files named `<rt64hash>.png` (16-hex, lowercase,
+  from `ReplacementDatabase::hashToString(uint64_t)` = `%016llx`). `autoPath:"rice"`
+  parses `<rom>#<ricekey>#..._all.png` filenames (ricekey = text between the first
+  `#` and last `_`, e.g. `1279903a#0#3`).
+- **Dump:** set `state->dumpingTexturesDirectory` (TextureManager::dumpTexture,
+  rt64_rdp_tmem.cpp). Writes per texture, hash-named: `.tmem`, `.tile.json`,
+  `.rice.rdram`, `.rice.json` (+ `.rice.palette.*` for CI). RAW N64 data, not PNG.
+- **Decode:** `scripts/decode_texture_dump.py` — decodes the linear `.rice.rdram`
+  (+ palette) using `.tile.json` dims/fmt into PNGs, contact sheets, and a
+  loadable `rt64.json` pack. CRITICAL: this runtime stores RDRAM byte-swapped
+  within 32-bit words (the `^2`/`^3` addressing), so `.rice.rdram` must be
+  32-bit-word byte-reversed before decoding (else pure noise). Formats seen:
+  CI8, RGBA16, RGBA32, IA8, IA16, I8.
+- **Port reconcile (thread-safety):** launcher setters (UI thread) only stage
+  statics + a dirty flag; `apply_texture_state_gfx()` (called from update_screen,
+  gfx thread) does the actual load/enable/dump so it never races send_dl. The
+  Enable checkbox tracks F4 via update_option_value+apply_option_value; the title
+  shows the live state.
+- **Rice packs (community hi-res packs, `<rom>#<crc>#<fmt>#<siz>_all.png`):** RT64
+  matches replacements by its OWN hash at runtime and does NOT compute Rice CRCs
+  live (the `.rice.*` dump is only for EXTERNAL Rice-hash generation). So a Rice
+  pack won't auto-load without either (a) runtime Rice-CRC computation added to
+  the upload/replacement path, or (b) an offline rice->rt64 database. IN PROGRESS:
+  adding runtime Rice-hash support to the rt64 fork.

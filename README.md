@@ -74,7 +74,10 @@ process left behind.
   **Enhancements** tab exposes border removal, camera FOV (with a reset-to-45°
   button), wave-grid size, and an **Unlock All Courses** button (marks every
   difficulty complete in the EEPROM save — keeps a `.unlock_backup` — applied on
-  next game start). The Mods tab and launcher entry are removed (Wave
+  next game start). A **Textures** tab enables RT64 HD texture-replacement packs
+  (enable toggle synced with the F4 hotkey, pack-folder path, and a texture-dump
+  toggle for pack authoring — see `textures/README.md`). The Mods tab and
+  launcher entry are removed (Wave
   Race 64 has no mods). Environment variables below remain as overrides/fallbacks
   and for dev tooling. **Border removal is boot-time** — toggling it in the
   launcher takes effect after a restart (the renderer's aspect ratio is fixed at
