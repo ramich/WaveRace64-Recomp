@@ -85,10 +85,15 @@ static std::atomic<RT64::Application*> s_app{nullptr};
 // WR64-specific game settings — configurable via launcher UI or env vars.
 // Statics are module-internal; setters are called by the launcher callbacks.
 // ---------------------------------------------------------------------------
-static bool     s_show_borders  = false; // false = border removal ON (default)
+static std::atomic<bool> s_show_borders{false}; // false = border removal ON (default)
 static uint32_t s_wavegrid_rows = 23;    // default wide wave grid
 static uint32_t s_wavegrid_cols = 55;
 static float    s_fov_degrees   = 47.75f; // matches toml patches; 0 = don't poke
+
+// Present-crop request latch, shared by the border-removal scene classifier
+// and the borders-on reset path so a border toggle re-sends the crop state.
+// -1 unknown, 0 menu (cropped 4:3), 1 gameplay (wide).
+static int s_crop_requested = -1;
 
 void wr64_set_show_borders(bool show)                        { s_show_borders  = show; }
 void wr64_set_wavegrid(uint32_t rows, uint32_t cols)         { s_wavegrid_rows = rows; s_wavegrid_cols = cols; }
@@ -144,6 +149,16 @@ static void apply_graphics_config_to_rt64(RT64::Application* app,
         case ultramodern::renderer::Resolution::Original2x:
             app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
             app->userConfig.resolutionMultiplier = 2.0f * std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+        case ultramodern::renderer::Resolution::Original3x:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = 3.0f * std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+        case ultramodern::renderer::Resolution::Original4x:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = 4.0f * std::max(cfg.ds_option, 1);
             app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
             break;
     }
@@ -554,27 +569,13 @@ public:
         // Enable developer/debug mode if requested.
         app_->userConfig.developerMode = developer_mode;
 
-        // WR64: always use Expand aspect ratio (scene-aspect design — menus are
-        // pillarboxed by VI-blit scissoring, not by changing this at runtime).
-        // WR64_WIDESCREEN=0 reverts to the N64's original 4:3 for testing.
-        const char* ws_env = std::getenv("WR64_WIDESCREEN");
-        if (!(ws_env && ws_env[0] == '0')) {
-            app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Expand;
-        }
-
-        // WR64_HIGHFPS=1 forces display-rate presentation even if the launcher
-        // config is set to Original (backwards-compat env var override).
-        const char* highfps_env = std::getenv("WR64_HIGHFPS");
-        if (highfps_env && highfps_env[0] == '1') {
-            app_->userConfig.refreshRate = RT64::UserConfiguration::RefreshRate::Display;
-        }
-
-        // Initialize WR64 game-settings statics from env vars. The launcher
-        // config callbacks call wr64_set_* after finalize() to override these
-        // with the user's saved preferences; env vars are the fallback.
+        // Initialize WR64 game-settings statics. The launcher config load
+        // callback (apply_wr64) has already run by construction time and set
+        // s_show_borders from the saved preference; WR64_BORDERS env overrides.
         {
             const char* b = std::getenv("WR64_BORDERS");
             if (b && b[0] == '1') s_show_borders = true;
+            else if (b && b[0] == '0') s_show_borders = false;
 
             const char* wg = std::getenv("WR64_WAVEGRID");
             if (wg) {
@@ -584,6 +585,32 @@ public:
                     s_wavegrid_cols = c > 96 ? 96 : c;
                 }
             }
+        }
+
+        // Aspect ratio is chosen ONCE here and never flipped at runtime (a
+        // runtime UserConfiguration change crashes in-flight queues with
+        // discardFBs, or ghosts stale targets without it — see docs/RE-NOTES).
+        //   - Border removal (default): Expand — the game rectangle is widened
+        //     to fill the window; per-scene menu pillarboxing is done by the
+        //     VI-blit crop (send_dl below).
+        //   - Show Borders (stock): Original — the game renders its native 4:3
+        //     frame with its own black overscan borders, pillarboxed in the
+        //     window at correct proportions. Because this is boot-time, toggling
+        //     the setting requires an application restart.
+        // WR64_WIDESCREEN=0 forces Original regardless (testing).
+        const char* ws_env = std::getenv("WR64_WIDESCREEN");
+        const bool widescreen = !(ws_env && ws_env[0] == '0');
+        if (widescreen && !s_show_borders) {
+            app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Expand;
+        } else {
+            app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Original;
+        }
+
+        // WR64_HIGHFPS=1 forces display-rate presentation even if the launcher
+        // config is set to Original (backwards-compat env var override).
+        const char* highfps_env = std::getenv("WR64_HIGHFPS");
+        if (highfps_env && highfps_env[0] == '1') {
+            app_->userConfig.refreshRate = RT64::UserConfiguration::RefreshRate::Display;
         }
 
         // Attempt setup.
@@ -654,11 +681,17 @@ public:
 
         apply_graphics_config_to_rt64(app_.get(), new_config);
 
-        // Re-apply WR64 aspect ratio override so a launcher change can't break widescreen.
+        // Re-apply the WR64 aspect ratio override so a launcher graphics-config
+        // apply can't reset it. MUST mirror the constructor's decision: Expand
+        // for border removal (default), Original for Show Borders (stock 4:3
+        // with the game's own black borders). This callback fires on the
+        // startup config apply too, so forcing Expand unconditionally here was
+        // silently reverting Show Borders back to the widened look.
         const char* ws_env = std::getenv("WR64_WIDESCREEN");
-        if (!(ws_env && ws_env[0] == '0')) {
-            app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Expand;
-        }
+        const bool widescreen = !(ws_env && ws_env[0] == '0');
+        app_->userConfig.aspectRatio = (widescreen && !s_show_borders)
+            ? RT64::UserConfiguration::AspectRatio::Expand
+            : RT64::UserConfiguration::AspectRatio::Original;
 
         bool res_changed  = new_config.res_option  != old_config.res_option;
         bool ar_changed   = new_config.ar_option   != old_config.ar_option;
@@ -704,9 +737,12 @@ public:
         // CPU-clips it to its view rect) and the foam framebuffer effect
         // (cannot extend past the original fb region). History and RE trail:
         // docs/RE-NOTES.md.
-        {
-            if (!s_show_borders) {
+        if (!s_show_borders) {
+            // Border-removal mode (Expand aspect). Scene classification drives
+            // the per-scene menu 4:3 crop plus the widescreen widening hooks.
+            {
                 uint8_t* rdram = app_->core.RDRAM;
+                const bool border_removal = true;
 
                 // Pass 1: gameplay detection. Gameplay frames draw the
                 // fullscreen tint texrect (0xE44D8368); menus don't. Menu
@@ -799,10 +835,9 @@ public:
                     static const char* sa_env = std::getenv("WR64_SCENE_ASPECT");
                     const bool widescreen_enabled = !(ws_env2 && ws_env2[0] == '0');
                     const bool scene_aspect_enabled = !(sa_env && sa_env[0] == '0');
-                    static int last_requested = -1; // -1 unknown, 0 menu, 1 gameplay
                     const int wanted = is_gameplay ? 1 : 0;
-                    if (widescreen_enabled && scene_aspect_enabled && wanted != last_requested) {
-                        last_requested = wanted;
+                    if (widescreen_enabled && scene_aspect_enabled && wanted != s_crop_requested) {
+                        s_crop_requested = wanted;
                         // Presentation-level pillarbox: rendering stays wide
                         // (Expand) at all times; only the final blit's scissor
                         // changes. Runtime UserConfiguration flips are not
@@ -838,8 +873,13 @@ public:
                         mask_sent = true;
                         rt64_wr64_set_scissor_widen_mask(scissor_mask);
                     }
-                    rt64_wr64_set_scissor_widen(is_gameplay ? 1 : 0);
-                    rt64_wr64_set_viewport_widen(is_gameplay ? 1 : 0);
+                    // Widen only during gameplay AND only when border removal
+                    // is active. In borders-on (stock) mode all widening is off
+                    // so the game presents its native frame with its own black
+                    // borders; menus in either mode get no widening.
+                    const bool widen = border_removal && is_gameplay;
+                    rt64_wr64_set_scissor_widen(widen ? 1 : 0);
+                    rt64_wr64_set_viewport_widen(widen ? 1 : 0);
                     // Wave-grid enlargement: the detail-water mesh is built
                     // per frame as a rows x cols camera-facing grid whose
                     // dimensions live in a static config block at 0x800DA8B4
@@ -848,19 +888,22 @@ public:
                     // every frame; docs/RE-NOTES.md). Stock 19x35 covers only
                     // the original 4:3 view; enlarge so detailed water fills
                     // widescreen. 23x55 verified stable at full frame rate
-                    // (27x63 also fine). WR64_WAVEGRID=RxC overrides.
-                    {
-                        if (is_gameplay) {
-                            wr32g(rdram, 0x800DA8B8u, s_wavegrid_rows);
-                            wr32g(rdram, 0x800DA8BCu, s_wavegrid_cols);
-                        }
+                    // (27x63 also fine). WR64_WAVEGRID=RxC overrides. In
+                    // borders-on mode force stock 19x35 so the static config
+                    // block doesn't keep the enlarged values after a live toggle.
+                    if (widen) {
+                        wr32g(rdram, 0x800DA8B8u, s_wavegrid_rows);
+                        wr32g(rdram, 0x800DA8BCu, s_wavegrid_cols);
+                    } else if (!border_removal && is_gameplay) {
+                        wr32g(rdram, 0x800DA8B8u, 19u);
+                        wr32g(rdram, 0x800DA8BCu, 35u);
                     }
                     // Keep world projections on RT64's wide-viewport path even
                     // while the game's camera-bob shifts its viewport (the
                     // shifted viewport otherwise fails RT64's coverage test
                     // mid-race and the whole scene collapses into the
                     // original-width center band).
-                    rt64_wr64_set_wide_world(is_gameplay ? 1 : 0);
+                    rt64_wr64_set_wide_world(widen ? 1 : 0);
                     static const char* sd_env = std::getenv("WR64_SCENE_DEBUG");
                     static uint32_t sc_frames = 0;
                     if (sd_env && sd_env[0] == '1' && (++sc_frames % 200) == 0) {
@@ -870,7 +913,7 @@ public:
                 }
 
                 uint32_t addr = dl_start_phys;
-                for (int i = 0; is_gameplay && i < 0x4000 && addr < 0x7FFFF8u; i++, addr += 8) {
+                for (int i = 0; border_removal && is_gameplay && i < 0x4000 && addr < 0x7FFFF8u; i++, addr += 8) {
                     uint32_t w0 = *(uint32_t*)(rdram + addr);
                     uint8_t op = w0 >> 24;
                     if (op == 0xB8) { // G_ENDDL (F3DEX)
@@ -988,14 +1031,19 @@ public:
                         }
                     }
                 }
-            } else {
-                // Borders-on mode: reset all widescreen hooks to their
-                // default-off state, matching WR64_BORDERS=1 boot-time behavior.
-                rt64_wr64_set_scissor_widen(0);
-                rt64_wr64_set_viewport_widen(0);
-                rt64_wr64_set_wide_world(0);
-                rt64_wr64_set_present_crop43(0);
             }
+        } else {
+            // Stock mode (Show Borders): aspect was set to Original at boot, so
+            // the game presents its native 4:3 frame with its own black overscan
+            // borders. Keep every runtime hook inert. (The aspect itself is
+            // boot-time; toggling Show Borders in the launcher needs a restart.)
+            rt64_wr64_set_scissor_widen(0);
+            rt64_wr64_set_viewport_widen(0);
+            rt64_wr64_set_wide_world(0);
+            rt64_wr64_set_present_crop43(0);
+            s_crop_requested = -1;
+            wr32g(app_->core.RDRAM, 0x800DA8B8u, 19u);
+            wr32g(app_->core.RDRAM, 0x800DA8BCu, 35u);
         }
 
         // Reset the RSP state machine before processing each new display list.
@@ -1046,39 +1094,62 @@ public:
                 if (!s_poke_loaded) {
                     poke_load();
                 }
+
+                // Launcher FOV override runs BEFORE poke_apply so that
+                // kind-2 (FOV) entries from poke_candidates.txt or WR64_POKE_FOV
+                // cannot overwrite the user's slider value. poke_apply checks
+                // cur == original; since we've already written desired, it
+                // finds cur != original and skips — launcher always wins.
+                //
+                // Scans every 120 updates (6s at 20fps) for both 45.0 and 75.0
+                // degree floats — both were confirmed live by POKE_FOV telemetry
+                // (0x800E98xx = race camera 45° structs, 0x800D7D20 = 75° struct).
+                // No back-off: race camera structs allocate AFTER the menus, so
+                // early scans find only menu-time values; we need continued scanning
+                // to pick up race addresses when they appear.
+                if (s_fov_degrees > 0.0f) {
+                    // last_written: the bits we last wrote so we can re-apply
+                    // when FOV changes mid-session without waiting for the game
+                    // to reinitialize the address back to orig.
+                    struct FovEntry { uint32_t addr, orig, last_written; };
+                    static std::vector<FovEntry> s_fov_addrs;
+                    static uint32_t s_fov_next_scan = 1;
+                    uint8_t* fov_rdram = app_->core.RDRAM;
+                    if (update_count >= s_fov_next_scan) {
+                        s_fov_next_scan = update_count + 120u;
+                        for (uint32_t g = 0x80000010; g < 0x807FFFF0; g += 4) {
+                            uint32_t w = rd32g(fov_rdram, g);
+                            if (w != 0x42340000u && w != 0x42960000u) continue;
+                            bool known = false;
+                            for (auto& e : s_fov_addrs)
+                                if (e.addr == g) { known = true; break; }
+                            if (!known && s_fov_addrs.size() < 512)
+                                s_fov_addrs.push_back({g, w, w});
+                        }
+                    }
+                    float desired_f = s_fov_degrees;
+                    for (auto& e : s_fov_addrs) {
+                        uint32_t cur = rd32g(fov_rdram, e.addr);
+                        // Apply if game wrote back the original value OR if the
+                        // address still holds what we last wrote (so a slider
+                        // change mid-session takes effect immediately).
+                        if (cur == e.orig || cur == e.last_written) {
+                            float scaled = desired_f * (bits_to_f(e.orig) / 45.0f);
+                            uint32_t bits = f_to_bits(scaled);
+                            if (bits != cur) {
+                                wr32g(fov_rdram, e.addr, bits);
+                                e.last_written = bits;
+                            }
+                        }
+                    }
+                }
+
                 if (s_poke_hi > s_poke_lo) {
                     poke_apply(app_->core.RDRAM);
                 }
                 static const char* frustum_env = std::getenv("WR64_POKE_FRUSTUM");
                 if (frustum_env && frustum_env[0] == '1') {
                     poke_frustum(app_->core.RDRAM);
-                }
-
-                // Launcher FOV override: scan RDRAM periodically for camera
-                // FOV floats (45° = 0x42340000, original; 47.75° = 0x423F0000,
-                // toml-patched default) and overwrite with s_fov_degrees every
-                // gameplay update. 1-frame latency is acceptable (camera struct
-                // is re-read next game logic tick).
-                if (s_fov_degrees > 0.0f) {
-                    static std::vector<uint32_t> s_fov_addrs;
-                    static uint32_t s_fov_next_scan = 300;
-                    uint8_t* fov_rdram = app_->core.RDRAM;
-                    if (update_count >= s_fov_next_scan) {
-                        s_fov_next_scan = update_count + 600;
-                        for (uint32_t g = 0x80000010; g < 0x807FFFF0; g += 4) {
-                            uint32_t w = rd32g(fov_rdram, g);
-                            if (w != 0x42340000u && w != 0x423F0000u) continue;
-                            bool known = false;
-                            for (uint32_t a : s_fov_addrs) { if (a == g) { known = true; break; } }
-                            if (!known && s_fov_addrs.size() < 512) s_fov_addrs.push_back(g);
-                        }
-                    }
-                    uint32_t desired = f_to_bits(s_fov_degrees);
-                    for (uint32_t addr : s_fov_addrs) {
-                        uint32_t cur = rd32g(fov_rdram, addr);
-                        if ((cur == 0x42340000u || cur == 0x423F0000u || cur == desired) && cur != desired)
-                            wr32g(fov_rdram, addr, desired);
-                    }
                 }
 
                 // WR64_PEEK=addr[,addr...] (hex): every 300 updates, log 8

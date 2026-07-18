@@ -16,6 +16,9 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 # Opt out of constexpr mutex constructor on windows to prevent vcredist issues
 if (WIN32)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+    # Enable the resource compiler so the custom application icon
+    # (resources/wr64.rc -> resources/wr64.ico) is embedded in the exe.
+    enable_language(RC)
 endif()
 
 # =============================================================================
@@ -198,6 +201,11 @@ set(WR64_SOURCES
     src/register_patches.cpp
     rsp/aspMain.cpp
 )
+
+# Embed the Windows application icon.
+if (WIN32)
+    list(APPEND WR64_SOURCES resources/wr64.rc)
+endif()
 
 add_executable(WaveRace64Recomp ${WR64_SOURCES})
 

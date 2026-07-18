@@ -9,4 +9,4 @@
 	url = https://github.com/ramich/N64ModernRuntime.git
 [submodule "lib/RecompFrontend"]
 	path = lib/RecompFrontend
-	url = https://github.com/N64Recomp/RecompFrontend
+	url = https://github.com/ramich/RecompFrontend

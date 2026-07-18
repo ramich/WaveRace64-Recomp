@@ -14,11 +14,16 @@ rem here) and twice: the N64Recomp step regenerates RecompiledFuncs which
 rem triggers a CMake reconfigure inside the first ninja run; the second run
 rem is a cheap no-op safety net that picks up anything the reconfigure pass
 rem missed.
+rem On failure, distill the compiler error lines into build_errors.log so the
+rem cause is one short Read away. IMPORTANT: some callers (e.g. the Claude Code
+rem PowerShell tool) suppress a command's stdout when it exits non-zero, so the
+rem "REBUILD FAILED" echo and error text may be invisible in the terminal - ALWAYS
+rem read build_errors.log (short) or build.log (full) after a failed rebuild.
 cd build
 ninja > ..\build.log 2>&1
-if errorlevel 1 (cd .. & echo REBUILD FAILED: ninja pass 1, see build.log & exit /b 1)
+if errorlevel 1 (cd .. & findstr /i /n /c:"error" build.log > build_errors.log & echo REBUILD FAILED: ninja pass 1 - see build_errors.log ^(short^) or build.log ^(full^) & type build_errors.log & exit /b 1)
 ninja > ..\build2.log 2>&1
-if errorlevel 1 (cd .. & echo REBUILD FAILED: ninja pass 2, see build2.log & exit /b 1)
+if errorlevel 1 (cd .. & findstr /i /n /c:"error" build2.log > build_errors.log & echo REBUILD FAILED: ninja pass 2 - see build_errors.log ^(short^) or build2.log ^(full^) & type build_errors.log & exit /b 1)
 cd ..
 rem Staleness guard: fail loudly if any source file is still newer than the
 rem exe after both ninja passes (the class of silent-stale-build failures

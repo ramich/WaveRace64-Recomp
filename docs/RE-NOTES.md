@@ -559,3 +559,143 @@ fix was found and verified end-to-end this way, no manual testing.
   loses image area; their "Overscan" feature handles VI-placement borders. Our
   scissor rewrite recovers real image instead of cropping — strictly better for
   this game.
+
+## Input / controls architecture — SOLVED (2026-07-18)
+
+Symptom: rebinding a control in the RecompFrontend launcher's Controls tab had
+no effect in-game (e.g. remap A→Space, but A still fired on X and Space did
+nothing). Root cause: the port's `src/input.cpp` read SDL directly
+(`SDL_GetKeyboardState` + a hardcoded `SDL_SCANCODE_*` → N64-bit table, and
+direct `SDL_GameController*` polling), completely bypassing recompinput. The
+Controls tab was writing bindings nobody read.
+
+Fix (all under `#ifdef HAS_RECOMPUI`, with the old direct-SDL path kept as the
+non-launcher fallback):
+- `input_get` now calls `recompinput::profiles::get_n64_input(0, buttons, x, y)`
+  — it aggregates the active keyboard + controller profiles, honours the user's
+  remapped bindings, applies the joystick deadzone, and suppresses game input
+  while a menu is capturing input.
+- `input_poll` now drives `recompinput::poll_inputs()` + `update_rumble()` each
+  frame; controllers are discovered by recompinput's SDL event filter (via
+  `recompinput::handle_events()` on the gfx thread), not by the port.
+- `main.cpp` calls `recompinput::players::set_single_player_mode(true)` after
+  `config::finalize()`. This is REQUIRED: `single_player_mode` defaults to false,
+  and `get_n64_input`'s multiplayer branch needs player-assignment; single-player
+  mode makes it use the SP keyboard/controller profiles directly. Those SP
+  profiles are created during `finalize()` → `load_controls_config`.
+
+Key recompinput facts (fork under ramich/RecompFrontend): binding edits and the
+read path share one array (`input_profiles[i].mappings`), so edits apply live;
+`should_override_keystate` only suppresses Alt+Enter; bindings persist in
+`controls.json`.
+
+## Border toggle = boot-time aspect — SOLVED (2026-07-18)
+
+The launcher "Show Borders" toggle must map to RT64's aspect ratio, chosen ONCE
+at renderer construction and never flipped at runtime (a runtime
+UserConfiguration aspect change crashes in-flight queues with discardFBs, or
+ghosts stale targets without — same constraint as the per-scene present-crop
+design). Mapping:
+- Border removal (default) → `AspectRatio::Expand` (image widened to the window;
+  menus pillarboxed by the VI-blit crop).
+- Show Borders (stock) → `AspectRatio::Original` (native 4:3 with the game's own
+  black borders, correct proportions, pillarboxed). All widescreen widening
+  hooks go inert.
+
+So the setting is **restart-required** (labelled as such in the UI).
+
+TRAP (the real bug behind "borders don't work even after restart"):
+`RT64Context::update_config` fires on the launcher's startup graphics-config
+apply and was unconditionally forcing `Expand`, silently reverting the
+constructor's `Original`. Fix: `update_config` must mirror the constructor —
+`Original` when `s_show_borders`, else `Expand`. Earlier dead ends: forcing the
+present-crop on for all borders-on scenes (squished gameplay — the crop is
+menu-only in BOTH modes); the live-toggle crop-latch left stale wide content in
+the margins (sky/water instead of black) because Expand rendering persisted.
+Lesson: with a fixed-at-boot aspect, don't try to make it look right live —
+make it correct on restart and say so.
+
+## Frame interpolation & the cloud stutter — INVESTIGATED (2026-07-18), unresolved
+
+Goal: fix the `WR64_HIGHFPS=1` cloud stutter. Two parallel investigations
+(RT64 internals + decomp) established:
+
+RT64 side (`lib/rt64/src/hle/rt64_game_frame.cpp`, active `GameFrame::match` at
+~:255 — NOT the commented reference block that ends ~:1041):
+- Interpolates four channels: view/proj transforms, world transforms (RigidBody
+  linear+angular), RDP **tiles** (UV/tile-descriptor scroll), and lookAt.
+- Per-vertex **velocity interpolation is wired in the shaders**
+  (`RSPWorldCS.hlsl`) **but never fed** for this game — the velocity buffer is
+  always zero. It's gated behind `vertexInterpolation != G_EX_COMPONENT_SKIP`,
+  set only by extended-GBI commands WR64 never emits. So a mesh with a static
+  transform but regenerated vertices is **held static across the interpolated
+  sub-frames, then snapped** = the stutter.
+- **Tile/UV interpolation is on by default** and would smooth continuous texture
+  scroll — BUT it rejects per-frame deltas that look like a wrap/page-flip
+  (≥ mask×2). A texture-segment swap therefore won't interpolate.
+- Draw calls are matched by a render-state hash + nearest-transform best-fit
+  (WR64 emits no extended-GBI IDs).
+
+Decomp side (`C:\dev\src\github\Wave-Race-64`): the in-race sky/clouds are 3D
+frustum geometry drawn inside **`func_8006E674` (0x8006E674), which is NOT
+decompiled** (GLOBAL_ASM stub), so the exact cloud motion can't be read from C.
+The engine's three animation techniques: (a) per-frame vertex regen (the wave
+mesh `func_8008FB74`), (b) per-frame `gSPSegment` texture-bank swaps
+(`func_80091DBC`) = page-flips, (c) matrix billboarding (`func_8006CB98` et al.)
+— note (c) would already interpolate, so the old "billboards regenerate
+vertices" note is partly self-contradictory. Best-supported causes: (a) vertex
+regen or (b) texture-segment page-flip.
+
+Decisive test not yet done: read the live cloud DL frame-to-frame (F1 inspector
+or a targeted `send_dl` logger) to see whether the Vtx buffer, the tile/segment,
+or only the matrix changes. NOTE: the F1 inspector in this fork is minimal —
+hovering/clicking geometry does nothing — so a `send_dl` diagnostic logger is
+the realistic route. Fix paths by outcome: (a) → game-patch the cloud DL builder
+to emit motion, or scoped vertex interp (hard: vertex correspondence for a
+count-unstable mesh); (b) → hold cleanly / retime, page-flips can't be tweened;
+(c) → matching bug, should already work.
+
+## EEPROM save format (Eep4k) — for save editing
+
+WR64 registers `SaveType::Eep4k` (4 kbit = 512 bytes). The runtime persists it
+to `saves/waverace64.bin` (+ `.bak`) under the config path (the exe's working
+dir for this build). Decomp: `src/game/core/wr64_save.c`.
+- Layout (partially typed — most of the 512-byte struct is untyped `pad`):
+  `0x00` s16 magic (`"TE"` = 0x5445), `0x02` u16 checksum, `0x04..0x1FF` payload
+  (player names, per-course records/ghost times, and the course-unlock/
+  championship-completion flags).
+- **Checksum** (`Save_GenCheckSum`): 16-bit sum of bytes `[4..511]`, stored big-
+  endian at `0x02`. Verified against a live save (0xc863). Trivial to regenerate
+  after an edit.
+- **Course unlock — SOLVED 2026-07-18 via the .bt template.** Time-Trial course
+  availability is derived from **difficulty completion**, not per-course lock
+  flags. Completion fields (offsets verified byte-for-byte against a live save):
+  - `0x08` normal (1 default → 6 finished), `0x09` hard (0 → 6),
+    `0x0A` expert (0 → 7), `0x0B` reverse (0 → 7)
+  - `0x0C` completion bitfield. The four `didFinish` bits are the **LOW nibble →
+    `0x0F`**. CORRECTION: my first attempt used `0xF0` (wrong nibble); it unlocked
+    the courses but **muted the menu music** — that mute was the tell that the
+    packing was reversed. Verified: `0x0F` unlocks AND keeps music.
+  - To unlock all: write `0x08..0x0C = 06 06 07 07 0F`, then regenerate the
+    checksum (sum bytes[4..511] & 0xFFFF at 0x02).
+  Shipped as launcher **Enhancements → Unlock All Courses**
+  (`wr64_unlock_all_courses()` in src/main.cpp: edits
+  `get_config_path()/saves/waverace64.bin`, writes a `.unlock_backup`, applies on
+  next game start). NOTE: the `unk50[3][3]` array at `0x50` (`{00 05 03}×3`) is
+  the wave/race **conditions**, NOT unlock. External reference:
+  KilianSteenman/N64-Save-file-formats `wave-race-64.bt` (010 Editor template).
+
+## Later-course crash — forensics pending (2026-07-18)
+
+A reproducible crash in a later course. Windows Event Log (Id 1000): exception
+`0xc0000005` (access violation) immediately followed by `0xc000041d` (fatal
+exception in a callback), **faulting module "unknown"**, fault address a full
+64-bit VA that **varies between runs** (ASLR-shifted). Signature = execution
+jumped to a computed/garbage address (bad indirect call/return target), not a
+fixed function — consistent with either a missing indirect-call symbol split or a
+game-logic bad pointer hit only on that course. The Event Log can't name the
+function (module "unknown"); a minidump/stack-trace crash handler
+(`SetUnhandledExceptionFilter`) would capture the recompiled caller from the
+stack. Not a full-machine save-state candidate — recomps run native across real
+threads, so emulator-style save states aren't feasible (RDRAM+context snapshot at
+a frame boundary is a research project, not a quick add).

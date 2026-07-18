@@ -1,0 +1,3 @@
+// Windows application icon resource.
+// ID 1 (lowest) so Explorer/taskbar use this as the executable's icon.
+1 ICON "wr64.ico"

@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <!-- Sky: deep navy at top fading to a warm dusk glow near the horizon -->
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#050b1a"/>
+      <stop offset="55%" stop-color="#0a1c34"/>
+      <stop offset="82%" stop-color="#16405e"/>
+      <stop offset="100%" stop-color="#2b6f7d"/>
+    </linearGradient>
+    <!-- Warm sun glow low on the horizon -->
+    <radialGradient id="sunGlow" cx="50%" cy="100%" r="70%">
+      <stop offset="0%"  stop-color="#ffd27a" stop-opacity="0.55"/>
+      <stop offset="35%" stop-color="#ff9e5e" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#ff9e5e" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Ocean bands -->
+    <linearGradient id="water1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#1f7a8c"/>
+      <stop offset="100%" stop-color="#0f5563"/>
+    </linearGradient>
+    <linearGradient id="water2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0f5563"/>
+      <stop offset="100%" stop-color="#0a3d4a"/>
+    </linearGradient>
+    <linearGradient id="water3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0a3a47"/>
+      <stop offset="100%" stop-color="#05222b"/>
+    </linearGradient>
+    <linearGradient id="foam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#eafcff"/>
+      <stop offset="100%" stop-color="#a9e6f0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Sky + sun -->
+  <rect x="0" y="0" width="1600" height="900" fill="url(#sky)"/>
+  <rect x="0" y="0" width="1600" height="900" fill="url(#sunGlow)"/>
+  <circle cx="800" cy="560" r="120" fill="#ffdd8f" opacity="0.28"/>
+  <circle cx="800" cy="560" r="70"  fill="#ffe9b0" opacity="0.35"/>
+
+  <!-- Sun shimmer on the water -->
+  <g opacity="0.30" fill="#ffe4a6">
+    <rect x="720" y="600" width="160" height="6" rx="3"/>
+    <rect x="700" y="622" width="200" height="6" rx="3"/>
+    <rect x="676" y="648" width="248" height="7" rx="3.5"/>
+    <rect x="648" y="678" width="304" height="8" rx="4"/>
+  </g>
+
+  <!-- Far wave band -->
+  <path fill="url(#water1)" d="M0 588
+    C 220 560, 360 616, 560 600
+    S 940 556, 1160 596
+    S 1460 570, 1600 590
+    L 1600 900 L 0 900 Z"/>
+  <path fill="url(#foam)" opacity="0.75" d="M0 588
+    C 220 560, 360 616, 560 600
+    S 940 556, 1160 596
+    S 1460 570, 1600 590
+    L 1600 600 C 1460 580, 1180 606, 1160 606
+    S 780 568, 560 610 S 220 572, 0 598 Z"/>
+
+  <!-- Mid wave band -->
+  <path fill="url(#water2)" d="M0 686
+    C 260 646, 480 712, 760 690
+    S 1200 640, 1600 688
+    L 1600 900 L 0 900 Z"/>
+  <path fill="url(#foam)" opacity="0.85" d="M0 686
+    C 260 646, 480 712, 760 690
+    S 1200 640, 1600 688
+    L 1600 700 C 1200 654, 980 706, 760 702
+    S 260 660, 0 700 Z"/>
+
+  <!-- Near, large rolling wave with a curling crest -->
+  <path fill="url(#water3)" d="M0 792
+    C 320 742, 560 824, 900 792
+    S 1340 730, 1600 786
+    L 1600 900 L 0 900 Z"/>
+  <path fill="url(#foam)" d="M0 792
+    C 320 742, 560 824, 900 792
+    S 1340 730, 1600 786
+    L 1600 802 C 1340 748, 1120 802, 900 804
+    S 320 756, 0 806 Z"/>
+
+  <!-- Spray flecks -->
+  <g fill="#eafcff" opacity="0.9">
+    <circle cx="430" cy="748" r="5"/>
+    <circle cx="470" cy="736" r="3.5"/>
+    <circle cx="405" cy="734" r="3"/>
+    <circle cx="1180" cy="742" r="5"/>
+    <circle cx="1215" cy="730" r="3.5"/>
+    <circle cx="1150" cy="730" r="3"/>
+  </g>
+</svg>

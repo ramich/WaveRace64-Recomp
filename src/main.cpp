@@ -12,6 +12,10 @@
 #include <string>
 #include <thread>
 #include <chrono>
+#include <vector>
+#include <fstream>
+#include <filesystem>
+#include <system_error>
 
 #include "librecomp/game.hpp"
 #include "librecomp/overlays.hpp"
@@ -28,6 +32,8 @@
 #include "recompui/recompui.h"
 #include "recompui/program_config.h"
 #include "recompui/config.h"
+#include "recompinput/input_events.h"
+#include "recompinput/players.h"
 #include "nfd.h"
 
 // WR64-specific renderer settings exposed by rt64_render_context.cpp.
@@ -159,11 +165,21 @@ SDL_Window* window = nullptr;
 // launcher_init_callback is registered; we register our own so this stays empty).
 std::vector<recomp::GameEntry> supported_games;
 
+static std::atomic<bool> s_quit_requested{false};
+
+static int sdl_quit_watch(void* /*userdata*/, SDL_Event* event) {
+    if (event->type == SDL_QUIT) {
+        s_quit_requested.store(true);
+    }
+    return 0;
+}
+
 static void* create_gfx() {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         fprintf(stderr, "[WR64] SDL_Init failed: %s\n", SDL_GetError());
         return nullptr;
     }
+    SDL_AddEventWatch(sdl_quit_watch, nullptr);
     return nullptr; // gfx_data not used
 }
 
@@ -214,33 +230,35 @@ static ultramodern::renderer::WindowHandle create_window(void* /*gfx_data*/) {
 }
 
 static void update_gfx(void* /*gfx_data*/) {
+#ifdef HAS_RECOMPUI
+    // handle_events() pumps the SDL queue and routes each event through
+    // recompinput's sdl_event_filter, which handles: F11 / Alt+Enter
+    // fullscreen toggle, controller device add/remove, binding-mode
+    // detection (joystick remapping), cursor visibility, and queuing to
+    // recompui for RmlUi. SDL_QUIT is caught by the sdl_quit_watch
+    // registered in create_gfx and applied below.
+    recompinput::handle_events();
+
+    if (s_quit_requested.exchange(false)) {
+        ultramodern::quit();
+    }
+#else
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        // Give RT64 first look (developer inspector input, F1-F4 shortcuts).
-        if (wr64::rt64_handle_sdl_event(&event)) {
-            continue;
-        }
-
-#ifdef HAS_RECOMPUI
-        // Forward every event to the UI system for RmlUi processing.
-        recompui::queue_event(event);
-#endif
-
         switch (event.type) {
             case SDL_QUIT:
                 ultramodern::quit();
                 break;
             case SDL_KEYDOWN:
-#ifndef HAS_RECOMPUI
                 if (event.key.keysym.scancode == SDL_SCANCODE_ESCAPE) {
                     ultramodern::quit();
                 }
-#endif
                 break;
             default:
                 break;
         }
     }
+#endif
 
     // One-shot safeguard: if the window ends up with its title bar off-screen
     // (can happen with DPI/multi-monitor centering and post-setup resizes),
@@ -260,15 +278,19 @@ static void update_gfx(void* /*gfx_data*/) {
         }
     }
 
-    // Title-bar FPS counter: game frames (display lists submitted) per second.
+    // Title-bar FPS counter: measured game frames (display lists submitted)
+    // per second, plus the currently selected target framerate. The target
+    // reflects the launcher's Frame Rate setting: Original -> 60, Display ->
+    // monitor refresh, Manual -> the chosen value.
     static uint32_t last_ticks = 0;
     uint32_t now = SDL_GetTicks();
     if (now - last_ticks >= 1000) {
         uint32_t frames = wr64::rt64_consume_frame_count();
         if (last_ticks != 0 && window != nullptr) {
-            char title[64];
-            SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS",
-                         frames * 1000.0f / (now - last_ticks));
+            uint32_t target = ultramodern::get_target_framerate(60);
+            char title[96];
+            SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS (target %u)",
+                         frames * 1000.0f / (now - last_ticks), target);
             SDL_SetWindowTitle(window, title);
         }
         last_ticks = now;
@@ -309,6 +331,62 @@ static void error_message_box(const char* msg) {
     if (window) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Wave Race 64 - Error", msg, window);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Unlock-all-courses: edit the EEPROM save file directly. Wave Race 64 gates
+// Time-Trial course availability on difficulty completion (not per-course lock
+// flags), so we mark all four difficulties finished. Save layout (verified;
+// KilianSteenman/N64-Save-file-formats wave-race-64.bt):
+//   0x00 s16 magic "TE"        0x02 u16 checksum (BE) = sum(bytes[4..511])&0xFFFF
+//   0x08 normal(1->6) 0x09 hard(0->6) 0x0A expert(0->7) 0x0B reverse(0->7)
+//   0x0C completion bitfield (didFinish bits = low nibble -> 0x0F; verified:
+//        0xF0 muted the menu music, so the four didFinish bits are the low four)
+// Takes effect when the game (re)starts (the running game holds its own RAM
+// copy read at boot). Returns true on success.
+static bool wr64_unlock_all_courses() {
+    std::error_code ec;
+    std::filesystem::path path = recomp::get_config_path() / "saves" / "waverace64.bin";
+    if (!std::filesystem::exists(path, ec)) {
+        fprintf(stderr, "[WR64] unlock: no save file at %s (run the game once first)\n",
+                path.string().c_str());
+        return false;
+    }
+
+    std::vector<uint8_t> d;
+    {
+        std::ifstream in(path, std::ios::binary);
+        d.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    if (d.size() != 0x200 || d[0] != 'T' || d[1] != 'E') {
+        fprintf(stderr, "[WR64] unlock: unexpected save format (size=%zu)\n", d.size());
+        return false;
+    }
+
+    // Keep a backup of the pre-unlock save so records can be restored.
+    std::filesystem::path bak = path;
+    bak += ".unlock_backup";
+    std::filesystem::copy_file(path, bak,
+        std::filesystem::copy_options::overwrite_existing, ec);
+
+    d[0x08] = 0x06; d[0x09] = 0x06; d[0x0A] = 0x07; d[0x0B] = 0x07;
+    d[0x0C] = 0x0F; // didFinish normal|hard|expert|reverse (low nibble)
+
+    uint32_t ck = 0;
+    for (size_t i = 4; i < 0x200; i++) ck += d[i];
+    ck &= 0xFFFF;
+    d[0x02] = static_cast<uint8_t>(ck >> 8);
+    d[0x03] = static_cast<uint8_t>(ck & 0xFF);
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out.good()) {
+        fprintf(stderr, "[WR64] unlock: cannot open save for writing\n");
+        return false;
+    }
+    out.write(reinterpret_cast<const char*>(d.data()), static_cast<std::streamsize>(d.size()));
+    fprintf(stderr, "[WR64] unlock: all courses unlocked in %s (restart to apply)\n",
+            path.string().c_str());
+    return out.good();
 }
 
 // ---------------------------------------------------------------------------
@@ -446,19 +524,23 @@ int main(int argc, char* argv[]) {
     recompui::config::create_graphics_tab();
     recompui::config::create_controls_tab();
     recompui::config::create_sound_tab();
-    recompui::config::create_mods_tab();
-
     // WR64-specific game settings tab.
     {
-        recomp::config::Config& wr64_cfg = recompui::config::create_config_tab("WR64", "wr64_settings", false);
-        wr64_cfg.add_bool_option("show_borders", "Show Borders",
-            "Show the original CRT-overscan black borders (WR64_BORDERS=1 behavior). "
-            "Off by default: scissors and camera FOV are widened for edge-to-edge rendering.",
+        recomp::config::Config& wr64_cfg = recompui::config::create_config_tab("Enhancements", "wr64_settings", true);
+        wr64_cfg.add_bool_option("show_borders", "Show Borders (restart required)",
+            "Restore the original 4:3 presentation with the game's black overscan "
+            "borders, pillarboxed at correct proportions. Off by default: the image "
+            "is widened edge-to-edge to fill the window. Changing this takes effect "
+            "after restarting the game (the renderer aspect ratio is fixed at launch).",
             false);
         wr64_cfg.add_number_option("fov_degrees", "Field of View",
-            "Camera FOV in degrees. Default 47.75 (wider than original 45). "
+            "Camera FOV in degrees. Default 47.75 (wider than original 45°). "
             "Higher values show more of the scene horizontally.",
             40.0, 75.0, 0.25, 2, false, 47.75);
+        wr64_cfg.add_bool_option("reset_fov", "Reset FOV to Original (45°)",
+            "Check this box and click Apply to reset the Field of View back to "
+            "the original N64 game value of 45°.",
+            false);
         wr64_cfg.add_enum_option("wave_grid", "Wave Detail Area",
             "How far the detailed foam-water mesh extends into widescreen. "
             "Larger grids fill more of an ultrawide screen at negligible cost.",
@@ -469,17 +551,40 @@ int main(int argc, char* argv[]) {
                 {3u, "widest",   "Widest (32x78)"},
                 {4u, "maximum",  "Maximum (40x96)"},
             }, 1u);
+        wr64_cfg.add_bool_option("unlock_courses", "Unlock All Courses",
+            "Check this box and click Apply to mark every difficulty complete in "
+            "the save file, unlocking all courses in Time Trials. Best done here in "
+            "the launcher before starting the game; it takes effect when the game "
+            "(re)starts. A backup of the previous save is kept.",
+            false);
 
         auto apply_wr64 = []() {
             recomp::config::Config& cfg = recompui::config::get_config("wr64_settings");
             wr64_set_show_borders(std::get<bool>(cfg.get_option_value("show_borders")));
-            float fov = static_cast<float>(std::get<double>(cfg.get_option_value("fov_degrees")));
-            wr64_set_fov_degrees(fov);
+
+            // If the reset checkbox is checked, snap the slider back to 45° and
+            // uncheck the box. update_option_value refreshes the UI so the slider
+            // shows the new value on next open.
+            if (std::get<bool>(cfg.get_option_value("reset_fov"))) {
+                cfg.update_option_value("fov_degrees", 45.0);
+                cfg.update_option_value("reset_fov", false);
+                wr64_set_fov_degrees(45.0f);
+            } else {
+                float fov = static_cast<float>(std::get<double>(cfg.get_option_value("fov_degrees")));
+                wr64_set_fov_degrees(fov);
+            }
+
             static constexpr uint32_t rows[] = {19, 23, 27, 32, 40};
             static constexpr uint32_t cols[] = {35, 55, 63, 78, 96};
             uint32_t idx = std::get<uint32_t>(cfg.get_option_value("wave_grid"));
             if (idx >= 5) idx = 1;
             wr64_set_wavegrid(rows[idx], cols[idx]);
+
+            // Unlock-all-courses button: edit the save file, then uncheck.
+            if (std::get<bool>(cfg.get_option_value("unlock_courses"))) {
+                wr64_unlock_all_courses();
+                cfg.update_option_value("unlock_courses", false);
+            }
         };
         wr64_cfg.set_load_callback(apply_wr64);
         wr64_cfg.set_save_callback(apply_wr64);
@@ -487,15 +592,72 @@ int main(int argc, char* argv[]) {
 
     recompui::config::finalize();
 
+    // Wave Race 64 is single-player: use the SP keyboard + controller profiles
+    // directly so input works without going through the player-assignment modal.
+    // get_n64_input() (see src/input.cpp) reads these profiles.
+    recompinput::players::set_single_player_mode(true);
+
+    // Pause-for-menu disabled pending fix (menu input freezes when paused).
+    // recompui::config::set_menu_open_callback([]() {
+    //     if (ultramodern::is_game_started()) {
+    //         ultramodern::set_paused_for_menu(true);
+    //     }
+    // });
+    // recompui::config::set_menu_close_callback([]() {
+    //     ultramodern::set_paused_for_menu(false);
+    // });
+
     recompui::register_launcher_init_callback([](recompui::LauncherMenu* menu) {
+        using namespace recompui;
         auto* options = menu->init_game_options_menu(
             u8"waverace64",
             "waverace64",
             "Wave Race 64",
             {},
-            recompui::GameOptionsMenuLayout::Center
+            GameOptionsMenuLayout::Center
         );
-        options->add_default_options();
+        // Original wave-themed launcher backdrop (assets/wr64_background.svg).
+        // Not the copyrighted Nintendo logo/artwork — an original evocation.
+        menu->set_launcher_background_svg("wr64_background.svg");
+
+        // Original two-tone wordmark title, replacing the plain program-name
+        // text. Our own colors/composition (aqua "WAVE RACE" + orange "64"),
+        // not the game's trademarked logo.
+        ContextId ctx = get_launcher_context_id();
+        menu->remove_default_title();
+        Element* title_row = ctx.create_element<Element>(menu);
+        title_row->set_position(Position::Absolute);
+        title_row->set_top(20.0f, Unit::Percent);
+        title_row->set_left(50.0f, Unit::Percent);
+        title_row->set_translate_2D(-50.0f, -50.0f, Unit::Percent);
+        title_row->set_display(Display::Flex);
+        title_row->set_flex_direction(FlexDirection::Row);
+        title_row->set_align_items(AlignItems::Center);
+        title_row->set_gap(16.0f);
+
+        auto style_word = [](Label* l, Color c) {
+            l->set_color(c);
+            l->set_font_size(72.0f);
+            l->set_letter_spacing(3.0f);
+        };
+        Label* wave = ctx.create_element<Label>(title_row, std::string("WAVE RACE"), theme::Typography::Header1);
+        style_word(wave, Color{120, 232, 246, 255});   // aqua cyan
+        Label* num = ctx.create_element<Label>(title_row, std::string("64"), theme::Typography::Header1);
+        style_word(num, Color{255, 150, 66, 255});      // warm orange accent
+
+        // Add options individually (instead of add_default_options()) to omit
+        // the Mods entry — Wave Race 64 has no mod support — and brighten the
+        // resting text so it reads clearly over the background art (the default
+        // is theme TextDim, which was hard to see).
+        GameOption* opts[] = {
+            options->add_start_game_or_load_rom_option(),
+            options->add_setup_controls_option(),
+            options->add_settings_option(),
+            options->add_exit_option(),
+        };
+        for (GameOption* o : opts) {
+            o->set_color(theme::color::White);
+        }
     });
 #endif
 

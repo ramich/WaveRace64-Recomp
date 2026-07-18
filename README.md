@@ -38,20 +38,22 @@ process left behind.
 | **Phase 3** | Runtime Integration | **COMPLETE** |
 | **Phase 4** | Build & Link (RT64 + Runtime) | **COMPLETE** |
 | **Phase 5** | Audio & Input | **COMPLETE** -- input verified by hand, audio via recompiled RSP microcode at 32 kHz |
-| **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode, menus, and races stable (races exercised extensively by the automated race driver, `scripts/drive_to_race.ps1`) |
-| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand), per-scene 4:3 menus, camera FOV widened via shipped instruction patches, FPS counter, dev inspector, RecompFrontend launcher UI (graphics/audio/controls config, mod support) |
+| **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode, menus, and races stable (races exercised extensively by the automated race driver, `scripts/drive_to_race.ps1`). One reproducible crash in a later course is under investigation (see Known Limitations) |
+| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand) with a stock-borders mode, per-scene 4:3 menus, camera FOV widened via shipped instruction patches, FPS + target-framerate readout, dev inspector, resolution up to 4x, custom launcher branding (background art + wordmark + app icon), and the RecompFrontend launcher UI with a game-specific **Enhancements** tab (borders / FOV / wave-grid / reset) |
 | **Phase 8** | Release Preparation | Not Started |
 
-> **Playable.** The game boots, menus respond to keyboard/controller, races run
-> stably start to finish, and music/voices play correctly. Any residual crash from
-> a missing indirect-call symbol is fixable in minutes with the included tooling
-> (see `scripts/`).
+> **Playable.** The game boots, the launcher and in-game settings respond to
+> keyboard/controller, races run stably start to finish, and music/voices play
+> correctly. Controls are fully rebindable through the launcher. A crash in a
+> later course is the current known issue (an access violation to a computed
+> address; forensics in progress). Residual crashes from a missing indirect-call
+> symbol remain fixable in minutes with the included tooling (see `scripts/`).
 
 ### Build Statistics
 
 | Metric | Value |
 |--------|-------|
-| **Executable** | `build/WaveRace64Recomp` (Linux ELF) / `build\WaveRace64Recomp.exe` (Windows, ~8 MB) |
+| **Executable** | `build/WaveRace64Recomp` (Linux ELF) / `build\WaveRace64Recomp.exe` (Windows, ~12.5 MB, custom embedded app icon) |
 | **Build system** | CMake + Ninja |
 | **Platforms** | Windows 11 x64 (clang-cl + MSVC environment, D3D12/Vulkan) -- verified; Linux x86_64 (Vulkan/SDL2) -- builds, unverified since Windows changes |
 | **Dependencies linked** | RT64, N64ModernRuntime (ultramodern), RecompFrontend (recompui + recompinput), recompiled funcs |
@@ -65,42 +67,61 @@ process left behind.
 - **Controller Pak:** Stub functions only (osPfs*)
 - **Symbol map:** JAL-scan derived; indirect-call targets are still being discovered
   during play-testing (automated fix loop: `scripts/bringup_loop.ps1`)
-- **Settings UI**: RecompFrontend launcher (graphics, audio, controls, mods) is integrated; most display settings (resolution, MSAA, framerate, fullscreen) are configurable via the launcher. Environment variables below remain as overrides/fallbacks for features not yet wired to the UI (borders, wave grid, widescreen toggle, dev tools)
+- **Settings UI**: the RecompFrontend launcher (graphics, audio, controls) is
+  integrated. Display settings (resolution up to 4x, MSAA, framerate, fullscreen)
+  apply live; **controls are fully rebindable** (the port routes input through
+  recompinput, so the Controls tab actually takes effect). A game-specific
+  **Enhancements** tab exposes border removal, camera FOV (with a reset-to-45°
+  button), wave-grid size, and an **Unlock All Courses** button (marks every
+  difficulty complete in the EEPROM save — keeps a `.unlock_backup` — applied on
+  next game start). The Mods tab and launcher entry are removed (Wave
+  Race 64 has no mods). Environment variables below remain as overrides/fallbacks
+  and for dev tooling. **Border removal is boot-time** — toggling it in the
+  launcher takes effect after a restart (the renderer's aspect ratio is fixed at
+  launch; see below)
 - **Widescreen rough edges** (needs game patches): objects can pop in at the screen
   edges because the game culls against its original frustum — confirmed NOT to
   follow the camera FOV. HUD/menu handling is solved (per-scene presentation below)
-- **Borders removed by default** (`WR64_BORDERS=1` restores the stock look): the
-  game draws black CRT-overscan borders inside its own framebuffer; the port
-  widens the game's scissors (top-level and sub-DL), ships the camera FOV widened
-  45° → 47.75° via recompiler instruction patches (5 bisected sites incl. the
-  in-race camera), stretches the atmosphere tint over the full frame, and
-  enlarges the detail-water wave grid (stock 19×35 → 23×55, `WR64_WAVEGRID`).
-  Remaining seams at extreme aspect ratios: the **shore strip** (the game
-  CPU-clips its large ground polygons to the original view rect — hunt ongoing)
-  and the water-foam framebuffer effect (structurally limited to the original
-  fb region). Full trail in `docs/RE-NOTES.md`. Shares its fix with widescreen
-  edge pop-in
+- **Borders removed by default** (launcher **Enhancements → Show Borders**, or
+  `WR64_BORDERS=1`, restores the stock look): the game draws black CRT-overscan
+  borders inside its own framebuffer; the port widens the game's scissors
+  (top-level and sub-DL), ships the camera FOV widened 45° → 47.75° via recompiler
+  instruction patches (5 bisected sites incl. the in-race camera), stretches the
+  atmosphere tint over the full frame, and enlarges the detail-water wave grid
+  (stock 19×35 → 23×55, `WR64_WAVEGRID`). **Stock mode is boot-time**: it renders
+  in RT64 `Original` aspect (native 4:3 with the game's own borders, correct
+  proportions, pillarboxed), while border removal uses `Expand`. RT64's aspect
+  ratio cannot be flipped safely at runtime (it crashes in-flight queues or
+  ghosts stale targets), so the aspect is chosen once at launch and **toggling
+  Show Borders requires a restart**. Remaining widescreen seams at extreme aspect
+  ratios: the **shore strip** (the game CPU-clips its large ground polygons to the
+  original view rect — hunt ongoing) and the water-foam framebuffer effect
+  (structurally limited to the original fb region). Full trail in
+  `docs/RE-NOTES.md`. Shares its fix with widescreen edge pop-in
 
 ### Environment variables & keys
 
 | Setting | Effect |
 |---------|--------|
 | `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
-| `WR64_BORDERS=1` | Restore the original in-framebuffer black borders. Border removal is the **default**: scissors (top-level and sub-DL) are widened, the atmosphere tint covers the full frame, the wave grid is enlarged, the HUD keeps proportions in widescreen, and 2D menus present as centered 4:3 (per-scene presentation). Remaining seams at extreme aspect ratios: the shore strip (game CPU-clips it to its view rect) and the water-foam framebuffer effect (see RE-NOTES) |
+| `WR64_BORDERS=1` | Restore the original in-framebuffer black borders (also togglable in the launcher **Enhancements** tab; the env var overrides the saved setting). Border removal is the **default**: scissors (top-level and sub-DL) are widened, the atmosphere tint covers the full frame, the wave grid is enlarged, the HUD keeps proportions in widescreen, and 2D menus present as centered 4:3. Stock (borders-on) mode uses RT64 `Original` aspect and is chosen at launch — changing it needs a restart. Remaining widescreen seams: the shore strip and the water-foam framebuffer effect (see RE-NOTES) |
 | `WR64_WAVEGRID=RxC` | Detail-water mesh grid size override (default `23x55`, stock game `19x35`, clamped to `40x96`). Larger grids extend the detailed foam water further into widescreen margins at negligible cost on PC |
 | `WR64_SCENE_ASPECT=0` | Disable the per-scene 4:3 menu presentation (keep everything widescreen). Only relevant while borders are removed (default) |
 | `WR64_SCENE_DEBUG=1` | Log the scene classifier (`[SCENE] world= menuworld= ... -> wide/menu`) |
 | `WR64_WINDOW=WxH` | Startup window size override (e.g. `1600x900`) |
 | `WR64_HUD=stretch` | Stretch all 2D (HUD and menus) with the window in widescreen instead of keeping it proportional/centered (default: centered; the centered mode relies on border removal — the default — for RT64's compensation to engage). A third mode — proportional elements anchored to the window edges — needs per-element extended-GBI tagging (future game patches) |
 | `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
-| `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: clouds stutter (billboards regenerate per game frame and can't be matched for interpolation — see `docs/RE-NOTES.md`) |
+| `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: **clouds stutter**. RT64 interpolates matrices and tile/UV scroll but has no active per-vertex velocity path (it needs extended-GBI motion the game never emits), so any mesh whose vertices/texture-segments regenerate under a static transform is held then snapped. The exact cloud motion (vertex regen vs texture-segment page-flip) is still being pinned — the sky renderer lives in undecompiled asm (`func_8006E674`). See `docs/RE-NOTES.md` |
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
 
-Keyboard: WASD = stick, X = A, Z = B, LShift = Z, Return = START, arrows = D-pad,
-Q/E = L/R, IJKL = C-buttons, Esc = open settings menu (during gameplay; settings menu has a quit option). Game controllers map automatically; the
-window title shows the game FPS.
+Keyboard (defaults): WASD = stick, X = A, Z = B, LShift = Z, Return = START,
+arrows = D-pad, Q/E = L/R, IJKL = C-buttons, Esc = open settings menu (during
+gameplay; the settings menu has a quit option), F11 / Alt+Enter = fullscreen.
+**All bindings are remappable** in the launcher's Controls tab. Game controllers
+map automatically; the window title shows the measured FPS and the selected
+target framerate.
 
 ### RT64 developer tools
 

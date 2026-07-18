@@ -29,6 +29,16 @@
 #include <cmath>
 #include <SDL2/SDL.h>
 
+#ifdef HAS_RECOMPUI
+// With the RecompFrontend launcher present, input flows through recompinput so
+// the Controls remapping UI (per-input rebinding, controller profiles) actually
+// takes effect. The direct-SDL path below is the fallback for builds without
+// the launcher.
+#include "recompinput/input_state.h"
+#include "recompinput/profiles.h"
+#include "recompinput/players.h"
+#endif
+
 // N64 controller button bits (matching libultra OS_CONT_* defines).
 #define N64_BTN_A       0x8000
 #define N64_BTN_B       0x4000
@@ -48,8 +58,9 @@
 
 namespace wr64 {
 
+#ifndef HAS_RECOMPUI
 // ---------------------------------------------------------------------------
-// Internal state
+// Internal state (direct-SDL fallback path only)
 // ---------------------------------------------------------------------------
 
 static SDL_GameController* game_controller = nullptr;
@@ -71,9 +82,50 @@ static void try_open_controller() {
     }
 }
 
+#endif // !HAS_RECOMPUI
+
 // ---------------------------------------------------------------------------
 // Public API (matches ultramodern::input::callbacks_t)
 // ---------------------------------------------------------------------------
+
+#ifdef HAS_RECOMPUI
+
+void input_poll() {
+    // recompinput discovers controllers via the SDL event filter (driven by
+    // recompinput::handle_events() on the gfx thread), so all we do here is
+    // refresh its cached keyboard/controller snapshot and ramp rumble.
+    recompinput::poll_inputs();
+    recompinput::update_rumble();
+}
+
+bool input_get(int controller_num, uint16_t* buttons, float* x, float* y) {
+    if (controller_num != 0) {
+        return false;
+    }
+    // get_n64_input aggregates the active keyboard + controller profiles for
+    // player 0, honouring the user's remapped bindings, applying the joystick
+    // deadzone, and suppressing game input while a menu is capturing input.
+    return recompinput::profiles::get_n64_input(controller_num, buttons, x, y);
+}
+
+void input_set_rumble(int controller_num, bool rumble) {
+    recompinput::set_rumble(controller_num, rumble);
+}
+
+ultramodern::input::connected_device_info_t input_get_connected_device_info(int controller_num) {
+    if (controller_num != 0) {
+        return {
+            .connected_device = ultramodern::input::Device::None,
+            .connected_pak    = ultramodern::input::Pak::None,
+        };
+    }
+    return {
+        .connected_device = ultramodern::input::Device::Controller,
+        .connected_pak    = ultramodern::input::Pak::RumblePak,
+    };
+}
+
+#else // !HAS_RECOMPUI — direct-SDL fallback
 
 void input_poll() {
     if (!controller_initialized) {
@@ -218,5 +270,7 @@ ultramodern::input::connected_device_info_t input_get_connected_device_info(int 
         .connected_pak    = ultramodern::input::Pak::RumblePak,
     };
 }
+
+#endif // HAS_RECOMPUI
 
 } // namespace wr64
