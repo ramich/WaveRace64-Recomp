@@ -21,6 +21,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <algorithm>
 #include <atomic>
 #include <vector>
@@ -80,6 +81,7 @@ static void dummy_check_interrupts() {}
 
 // Live application pointer for event forwarding (single renderer instance).
 static std::atomic<RT64::Application*> s_app{nullptr};
+static std::atomic<bool> s_tex_pack_loaded{false};
 
 // ---------------------------------------------------------------------------
 // WR64-specific game settings — configurable via launcher UI or env vars.
@@ -653,6 +655,52 @@ public:
             default:
                 chosen_api = ultramodern::renderer::GraphicsApi::Vulkan;
                 break;
+        }
+
+        // ---- HD texture packs (replacement) + texture dumping ----
+        // RT64 has a first-class texture-replacement system; these two env hooks
+        // enable it for WR64. Both are safe no-ops when unset or the dir is
+        // missing.
+        //   WR64_TEXPACK=<dir> (or "1" -> ./textures): load a replacement pack
+        //     (a folder with rt64.json + hash-named images) and enable it. Toggle
+        //     live afterwards with F4.
+        //   WR64_TEXDUMP=<dir> (or "1" -> ./textures_dump): dump every texture
+        //     RT64 loads, hash-named, in its Rice/TMEM dump format — the raw
+        //     material for building a pack (convert with RT64's texture-pack
+        //     tooling). Hash = the 16-hex filename prefix; that's the key a
+        //     replacement is matched on.
+        if (app_->textureCache != nullptr) {
+            const char* pack = std::getenv("WR64_TEXPACK");
+            if (pack && pack[0] != '\0' && pack[0] != '0') {
+                std::filesystem::path packDir = (std::strcmp(pack, "1") == 0)
+                    ? std::filesystem::path("textures") : std::filesystem::path(pack);
+                std::error_code ec;
+                if (std::filesystem::is_directory(packDir, ec)) {
+                    if (app_->textureCache->loadReplacementDirectory(RT64::ReplacementDirectory(packDir))) {
+                        app_->textureCache->textureMap.replacementMapEnabled = true;
+                        s_tex_pack_loaded.store(true);
+                        fprintf(stderr, "[WR64-TEX] texture pack loaded + enabled: %s\n",
+                                packDir.string().c_str());
+                    } else {
+                        fprintf(stderr, "[WR64-TEX] texture pack failed to load (no rt64.json?): %s\n",
+                                packDir.string().c_str());
+                    }
+                } else {
+                    fprintf(stderr, "[WR64-TEX] texture pack dir not found: %s\n",
+                            packDir.string().c_str());
+                }
+            }
+        }
+        if (app_->state != nullptr) {
+            const char* dump = std::getenv("WR64_TEXDUMP");
+            if (dump && dump[0] != '\0' && dump[0] != '0') {
+                std::filesystem::path dumpDir = (std::strcmp(dump, "1") == 0)
+                    ? std::filesystem::path("textures_dump") : std::filesystem::path(dump);
+                std::error_code ec;
+                std::filesystem::create_directories(dumpDir, ec);
+                app_->state->dumpingTexturesDirectory = dumpDir;
+                fprintf(stderr, "[WR64-TEX] dumping textures to: %s\n", dumpDir.string().c_str());
+            }
         }
 
         printf("[WR64-RT64] Renderer context created (result=%d, api=%d)\n",
@@ -1363,6 +1411,16 @@ bool rt64_handle_sdl_event(void* sdl_event) {
 
 uint32_t rt64_consume_frame_count() {
     return s_frame_count.exchange(0, std::memory_order_relaxed);
+}
+
+bool rt64_texture_pack_loaded() {
+    return s_tex_pack_loaded.load(std::memory_order_relaxed);
+}
+
+bool rt64_replacements_enabled() {
+    RT64::Application* app = s_app.load();
+    return app != nullptr && app->textureCache != nullptr &&
+           app->textureCache->textureMap.replacementMapEnabled;
 }
 
 } // namespace wr64

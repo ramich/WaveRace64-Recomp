@@ -44,6 +44,11 @@ bool rt64_handle_sdl_event(void* sdl_event);
  */
 uint32_t rt64_consume_frame_count();
 
+// True once a WR64_TEXPACK replacement pack has been loaded this session.
+bool rt64_texture_pack_loaded();
+// Current state of RT64's texture-replacement toggle (F4).
+bool rt64_replacements_enabled();
+
 } // namespace wr64
 
 #endif // WR64_RT64_RENDER_CONTEXT_H

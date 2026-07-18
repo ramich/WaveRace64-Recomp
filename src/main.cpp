@@ -288,9 +288,14 @@ static void update_gfx(void* /*gfx_data*/) {
         uint32_t frames = wr64::rt64_consume_frame_count();
         if (last_ticks != 0 && window != nullptr) {
             uint32_t target = ultramodern::get_target_framerate(60);
-            char title[96];
-            SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS (target %u)",
-                         frames * 1000.0f / (now - last_ticks), target);
+            // Show the texture-replacement (F4) state when a pack is loaded, so
+            // it's clear which state you're comparing.
+            const char* tex = wr64::rt64_texture_pack_loaded()
+                ? (wr64::rt64_replacements_enabled() ? "  |  TEX: ON (HD)" : "  |  TEX: OFF (original)")
+                : "";
+            char title[128];
+            SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS (target %u)%s",
+                         frames * 1000.0f / (now - last_ticks), target, tex);
             SDL_SetWindowTitle(window, title);
         }
         last_ticks = now;
