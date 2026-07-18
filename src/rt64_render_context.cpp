@@ -22,6 +22,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
+#include <string>
 #include <algorithm>
 #include <atomic>
 #include <vector>
@@ -83,6 +85,69 @@ static void dummy_check_interrupts() {}
 static std::atomic<RT64::Application*> s_app{nullptr};
 static std::atomic<bool> s_tex_pack_loaded{false};
 
+// Texture-replacement state, driven by the launcher "Textures" tab (setters
+// below) and WR64_TEXPACK/WR64_TEXDUMP env overrides. UI-thread setters only
+// touch these + raise s_tex_dirty; the actual RT64 mutation happens on the gfx
+// thread in apply_texture_state_gfx() (called from update_screen).
+static std::mutex        s_tex_mutex;                 // guards the string members
+static std::string       s_tex_pack_dir;              // pack folder ("" = none)
+static std::string       s_tex_dump_dir = "textures_dump"; // hardcoded dump output
+static std::atomic<bool> s_tex_replace_enabled{true}; // enable replacements
+static std::atomic<bool> s_tex_dump_enabled{false};   // dump textures
+static std::atomic<bool> s_tex_dirty{false};          // runtime re-apply request
+
+// Reconcile RT64's texture state with the launcher/env settings. MUST be called
+// on the gfx thread (loads packs / mutates textureCache + state, which the
+// render path also touches). Cheap no-op unless s_tex_dirty is set. Only forces
+// replacementMapEnabled on an apply, so F4 can freely toggle in between.
+static void apply_texture_state_gfx(RT64::Application* app) {
+    if (app == nullptr || !s_tex_dirty.exchange(false)) {
+        return;
+    }
+    std::string want_pack, dump_dir;
+    {
+        std::lock_guard<std::mutex> lk(s_tex_mutex);
+        want_pack = s_tex_pack_dir;
+        dump_dir = s_tex_dump_dir;
+    }
+    // (Re)load the pack when the folder changes.
+    static std::string applied_pack;  // gfx-thread-only
+    if (app->textureCache != nullptr && want_pack != applied_pack) {
+        applied_pack = want_pack;
+        s_tex_pack_loaded.store(false);
+        if (!want_pack.empty()) {
+            std::error_code ec;
+            if (std::filesystem::is_directory(want_pack, ec)) {
+                if (app->textureCache->loadReplacementDirectory(RT64::ReplacementDirectory(want_pack))) {
+                    s_tex_pack_loaded.store(true);
+                    fprintf(stderr, "[WR64-TEX] texture pack loaded: %s\n", want_pack.c_str());
+                } else {
+                    fprintf(stderr, "[WR64-TEX] texture pack failed to load (no rt64.json?): %s\n", want_pack.c_str());
+                }
+            } else {
+                fprintf(stderr, "[WR64-TEX] texture pack dir not found: %s\n", want_pack.c_str());
+            }
+        }
+    }
+    if (app->textureCache != nullptr) {
+        app->textureCache->textureMap.replacementMapEnabled =
+            s_tex_replace_enabled.load() && s_tex_pack_loaded.load();
+    }
+    // Dumping: hardcoded output dir (dump_dir; env WR64_TEXDUMP=<path> can override).
+    if (app->state != nullptr) {
+        const bool dump = s_tex_dump_enabled.load();
+        if (dump && app->state->dumpingTexturesDirectory.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(dump_dir, ec);
+            app->state->dumpingTexturesDirectory = dump_dir;
+            fprintf(stderr, "[WR64-TEX] dumping textures to: %s\n", dump_dir.c_str());
+        } else if (!dump && !app->state->dumpingTexturesDirectory.empty()) {
+            app->state->dumpingTexturesDirectory.clear();
+            fprintf(stderr, "[WR64-TEX] texture dumping stopped\n");
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WR64-specific game settings — configurable via launcher UI or env vars.
 // Statics are module-internal; setters are called by the launcher callbacks.
@@ -100,6 +165,15 @@ static int s_crop_requested = -1;
 void wr64_set_show_borders(bool show)                        { s_show_borders  = show; }
 void wr64_set_wavegrid(uint32_t rows, uint32_t cols)         { s_wavegrid_rows = rows; s_wavegrid_cols = cols; }
 void wr64_set_fov_degrees(float deg)                         { s_fov_degrees   = deg;  }
+
+// Launcher "Textures" tab setters (UI thread). They only stage state + raise the
+// dirty flag; apply_texture_state_gfx() applies it on the gfx thread.
+void wr64_set_texture_pack(const char* dir) {
+    { std::lock_guard<std::mutex> lk(s_tex_mutex); s_tex_pack_dir = (dir ? dir : ""); }
+    s_tex_dirty.store(true);
+}
+void wr64_set_texture_replace(bool enabled) { s_tex_replace_enabled.store(enabled); s_tex_dirty.store(true); }
+void wr64_set_texture_dump(bool enabled)    { s_tex_dump_enabled.store(enabled);    s_tex_dirty.store(true); }
 
 // ---------------------------------------------------------------------------
 // GraphicsConfig → RT64 UserConfiguration helpers
@@ -658,49 +732,28 @@ public:
         }
 
         // ---- HD texture packs (replacement) + texture dumping ----
-        // RT64 has a first-class texture-replacement system; these two env hooks
-        // enable it for WR64. Both are safe no-ops when unset or the dir is
-        // missing.
-        //   WR64_TEXPACK=<dir> (or "1" -> ./textures): load a replacement pack
-        //     (a folder with rt64.json + hash-named images) and enable it. Toggle
-        //     live afterwards with F4.
-        //   WR64_TEXDUMP=<dir> (or "1" -> ./textures_dump): dump every texture
-        //     RT64 loads, hash-named, in its Rice/TMEM dump format — the raw
-        //     material for building a pack (convert with RT64's texture-pack
-        //     tooling). Hash = the 16-hex filename prefix; that's the key a
-        //     replacement is matched on.
-        if (app_->textureCache != nullptr) {
+        // RT64's texture-replacement system is driven by the launcher "Textures"
+        // tab (wr64_set_texture_* below) and, as startup overrides, the env vars
+        // WR64_TEXPACK / WR64_TEXDUMP. Env vars win at launch; runtime launcher
+        // changes are reconciled on the gfx thread (apply_texture_state_gfx,
+        // called from update_screen). The actual RT64 mutation always happens on
+        // the gfx thread to stay safe against send_dl/update_screen.
+        {
             const char* pack = std::getenv("WR64_TEXPACK");
-            if (pack && pack[0] != '\0' && pack[0] != '0') {
-                std::filesystem::path packDir = (std::strcmp(pack, "1") == 0)
-                    ? std::filesystem::path("textures") : std::filesystem::path(pack);
-                std::error_code ec;
-                if (std::filesystem::is_directory(packDir, ec)) {
-                    if (app_->textureCache->loadReplacementDirectory(RT64::ReplacementDirectory(packDir))) {
-                        app_->textureCache->textureMap.replacementMapEnabled = true;
-                        s_tex_pack_loaded.store(true);
-                        fprintf(stderr, "[WR64-TEX] texture pack loaded + enabled: %s\n",
-                                packDir.string().c_str());
-                    } else {
-                        fprintf(stderr, "[WR64-TEX] texture pack failed to load (no rt64.json?): %s\n",
-                                packDir.string().c_str());
-                    }
-                } else {
-                    fprintf(stderr, "[WR64-TEX] texture pack dir not found: %s\n",
-                            packDir.string().c_str());
-                }
+            if (pack && pack[0] != '\0' && std::strcmp(pack, "0") != 0) {
+                std::lock_guard<std::mutex> lk(s_tex_mutex);
+                s_tex_pack_dir = (std::strcmp(pack, "1") == 0) ? "textures" : pack;
+                s_tex_replace_enabled.store(true);
             }
-        }
-        if (app_->state != nullptr) {
             const char* dump = std::getenv("WR64_TEXDUMP");
-            if (dump && dump[0] != '\0' && dump[0] != '0') {
-                std::filesystem::path dumpDir = (std::strcmp(dump, "1") == 0)
-                    ? std::filesystem::path("textures_dump") : std::filesystem::path(dump);
-                std::error_code ec;
-                std::filesystem::create_directories(dumpDir, ec);
-                app_->state->dumpingTexturesDirectory = dumpDir;
-                fprintf(stderr, "[WR64-TEX] dumping textures to: %s\n", dumpDir.string().c_str());
+            if (dump && dump[0] != '\0' && std::strcmp(dump, "0") != 0) {
+                if (std::strcmp(dump, "1") != 0) {  // custom dir (power-user override)
+                    std::lock_guard<std::mutex> lk(s_tex_mutex);
+                    s_tex_dump_dir = dump;
+                }
+                s_tex_dump_enabled.store(true);
             }
+            s_tex_dirty.store(true);  // first update_screen applies it
         }
 
         printf("[WR64-RT64] Renderer context created (result=%d, api=%d)\n",
@@ -1121,6 +1174,8 @@ public:
 
     void update_screen() override {
         if (app_) {
+            // Apply any pending launcher texture-setting changes (gfx thread).
+            apply_texture_state_gfx(app_.get());
             // Diagnostics: WR64_FB_DUMP=1 dumps the 320x240 framebuffer to
             // fb_dump.bin / fb_dump2.bin / fb_dump3.bin at ~10s/~30s/~50s, for
             // offline analysis with scripts/measure_borders.py.

@@ -40,6 +40,9 @@
 extern void wr64_set_show_borders(bool show);
 extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
 extern void wr64_set_fov_degrees(float deg);
+extern void wr64_set_texture_pack(const char* dir);
+extern void wr64_set_texture_replace(bool enabled);
+extern void wr64_set_texture_dump(bool enabled);
 #endif
 
 // Pull in the recompiled function declarations and overlay tables.
@@ -278,27 +281,52 @@ static void update_gfx(void* /*gfx_data*/) {
         }
     }
 
-    // Title-bar FPS counter: measured game frames (display lists submitted)
-    // per second, plus the currently selected target framerate. The target
-    // reflects the launcher's Frame Rate setting: Original -> 60, Display ->
-    // monitor refresh, Manual -> the chosen value.
+#ifdef HAS_RECOMPUI
+    // Keep the Textures "Enable Texture Pack" checkbox in sync with F4, which
+    // toggles RT64's replacement flag directly — including while the settings
+    // menu is open. update_option_value re-renders the checkbox; apply_option_value
+    // commits it so it doesn't read as an unapplied change. Only fires on an
+    // actual change. (Runs on the gfx thread, same as recompui's own updates.)
+    if (wr64::rt64_texture_pack_loaded()) {
+        static int last_synced = -1;
+        int live = wr64::rt64_replacements_enabled() ? 1 : 0;
+        if (live != last_synced) {
+            last_synced = live;
+            recomp::config::Config& cfg = recompui::config::get_config("wr64_textures");
+            if (std::get<bool>(cfg.get_option_value("tex_enable")) != (bool)live) {
+                cfg.update_option_value("tex_enable", (bool)live);
+                cfg.apply_option_value("tex_enable");
+            }
+        }
+    }
+#endif
+
+    // Title bar: measured FPS + selected target framerate + texture-replacement
+    // state. FPS is recomputed on a 1s tick, but the title is ALSO refreshed the
+    // instant the TEX state changes (e.g. F4 toggle) so it never lags behind.
     static uint32_t last_ticks = 0;
+    static float    last_fps = 0.0f;
+    static int      last_tex = -2;  // -1 no pack, 0 off, 1 on; -2 = force first draw
     uint32_t now = SDL_GetTicks();
-    if (now - last_ticks >= 1000) {
+    bool tick = (now - last_ticks >= 1000);
+    if (tick) {
         uint32_t frames = wr64::rt64_consume_frame_count();
-        if (last_ticks != 0 && window != nullptr) {
-            uint32_t target = ultramodern::get_target_framerate(60);
-            // Show the texture-replacement (F4) state when a pack is loaded, so
-            // it's clear which state you're comparing.
-            const char* tex = wr64::rt64_texture_pack_loaded()
-                ? (wr64::rt64_replacements_enabled() ? "  |  TEX: ON (HD)" : "  |  TEX: OFF (original)")
-                : "";
-            char title[128];
-            SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS (target %u)%s",
-                         frames * 1000.0f / (now - last_ticks), target, tex);
-            SDL_SetWindowTitle(window, title);
+        if (last_ticks != 0) {
+            last_fps = frames * 1000.0f / (now - last_ticks);
         }
         last_ticks = now;
+    }
+    int tex = wr64::rt64_texture_pack_loaded()
+        ? (wr64::rt64_replacements_enabled() ? 1 : 0) : -1;
+    if (window != nullptr && (tick || tex != last_tex) && last_fps > 0.0f) {
+        last_tex = tex;
+        uint32_t target = ultramodern::get_target_framerate(60);
+        const char* texs = (tex < 0) ? ""
+                         : (tex == 1) ? "  |  TEX: ON (HD)" : "  |  TEX: OFF (original)";
+        char title[128];
+        SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS (target %u)%s",
+                     last_fps, target, texs);
+        SDL_SetWindowTitle(window, title);
     }
 }
 
@@ -594,6 +622,34 @@ int main(int argc, char* argv[]) {
         wr64_cfg.set_load_callback(apply_wr64);
         wr64_cfg.set_save_callback(apply_wr64);
     }
+    // Textures tab: HD texture-replacement packs.
+    {
+        recomp::config::Config& tex_cfg = recompui::config::create_config_tab("Textures", "wr64_textures", true);
+        tex_cfg.add_bool_option("tex_enable", "Enable Texture Pack",
+            "Load HD replacement textures from the folder below. Applies live; "
+            "you can also toggle replacements in-game with F4.",
+            true);
+        tex_cfg.add_string_option("tex_pack_dir", "Texture Pack Folder",
+            "Path to a texture pack folder (contains rt64.json + hash-named "
+            "images). Relative paths are resolved from the game's folder. "
+            "Overridden at launch by the WR64_TEXPACK environment variable.",
+            "textures");
+        tex_cfg.add_bool_option("tex_dump", "Dump Textures (advanced)",
+            "Write every texture the game loads to the 'textures_dump' folder "
+            "(raw N64 format). Decode them into editable PNGs + a loadable pack "
+            "with scripts/decode_texture_dump.py — see textures/README.md. For "
+            "creating packs; leave off for normal play.",
+            false);
+
+        auto apply_tex = []() {
+            recomp::config::Config& cfg = recompui::config::get_config("wr64_textures");
+            wr64_set_texture_pack(std::get<std::string>(cfg.get_option_value("tex_pack_dir")).c_str());
+            wr64_set_texture_replace(std::get<bool>(cfg.get_option_value("tex_enable")));
+            wr64_set_texture_dump(std::get<bool>(cfg.get_option_value("tex_dump")));
+        };
+        tex_cfg.set_load_callback(apply_tex);
+        tex_cfg.set_save_callback(apply_tex);
+    }
 
     recompui::config::finalize();
 
@@ -603,11 +659,6 @@ int main(int argc, char* argv[]) {
     recompinput::players::set_single_player_mode(true);
 
     // Pause-for-menu disabled pending fix (menu input freezes when paused).
-    // recompui::config::set_menu_open_callback([]() {
-    //     if (ultramodern::is_game_started()) {
-    //         ultramodern::set_paused_for_menu(true);
-    //     }
-    // });
     // recompui::config::set_menu_close_callback([]() {
     //     ultramodern::set_paused_for_menu(false);
     // });
