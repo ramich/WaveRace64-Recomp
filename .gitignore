@@ -54,3 +54,8 @@ RecompiledPatches/
 
 # AI session context - local only
 CLAUDE.md
+
+# Dumped game textures + generated packs (copyrighted assets — never commit)
+/textures_dump/
+/textures/*
+!/textures/README.md

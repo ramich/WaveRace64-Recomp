@@ -115,6 +115,8 @@ process left behind.
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
+| `WR64_TEXPACK=<dir>` | Load an RT64 HD texture-replacement pack from `<dir>` (a folder with `rt64.json` + hash-named images) and enable it; toggle live with **F4**. `WR64_TEXPACK=1` = `./textures`. See `textures/README.md` |
+| `WR64_TEXDUMP=<dir>` | Dump every texture RT64 loads (hash-named, Rice/TMEM format) into `<dir>` — raw material for building a pack. `WR64_TEXDUMP=1` = `./textures_dump`. See `textures/README.md` |
 
 Keyboard (defaults): WASD = stick, X = A, Z = B, LShift = Z, Return = START,
 arrows = D-pad, Q/E = L/R, IJKL = C-buttons, Esc = open settings menu (during
@@ -143,7 +145,7 @@ WR64_DEV=1 ./build/WaveRace64Recomp
 | **F1** | RT64 Inspector (ImGui): render statistics/profiling, framebuffer views, user & enhancement configuration editors (resolution, aspect, MSAA, filtering -- applied live) |
 | **F2** | Toggle ray tracing — **non-functional in current RT64**: the shortcut flips the flag, but every consumer sits behind `#if RT_ENABLED`, which no build defines, and the RT shader pipeline was never ported into the modern RT64 rewrite (it's a leftover from the original SM64RT-era path tracer). No GPU will show a difference |
 | **F3** | Toggle raw-RDRAM framebuffer view (shows the game's original 320x240 output; brief artifacts when toggling back are a known RT64 quirk) |
-| **F4** | Toggle texture replacements |
+| **F4** | Toggle texture replacements on/off (no effect unless a pack is loaded via `WR64_TEXPACK` — see `textures/README.md`) |
 
 Without `WR64_DEV=1` these keys are deliberately inert (RT64 itself only guards F1;
 we gate the rest to keep players out of debug views).
@@ -359,6 +361,7 @@ WaveRace64-Recomp/
 | [`drive_to_race.ps1`](scripts/drive_to_race.ps1) | Autonomous race driver: boots the game, navigates title → Time Trials → Sunny Beach → live race and holds the accelerator, capturing screenshots + telemetry. Same no-focus-steal input as above. The workhorse behind the FOV-site classification sweeps |
 | [`classify_fov_sites.py`](scripts/classify_fov_sites.py) / [`classify_fov_sites_race.py`](scripts/classify_fov_sites_race.py) | Per-site camera-FOV bisection: patch one inline-45.0f site at a time (via `[[patches.instruction]]`), rebuild, probe attract demos / a live race, and classify by RT64 projection telemetry |
 | [`probe_fov_group.py`](scripts/probe_fov_group.py) | Group-bisection variant: patch an arbitrary set of FOV sites per run — found the in-race camera site in ~6 runs instead of 28 |
+| [`decode_texture_dump.py`](scripts/decode_texture_dump.py) | Decode a `WR64_TEXDUMP` texture dump into viewable PNGs, labeled contact sheets (`_index_*.png`), a hash→format listing, and a directly-loadable RT64 pack (`png/` + `rt64.json`). Handles this runtime's 32-bit-word byte-swap and the CI8/RGBA16/RGBA32/IA/I formats. See `textures/README.md` |
 
 ## Related Projects
 
