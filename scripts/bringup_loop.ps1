@@ -7,10 +7,17 @@ param(
     [int]$ProbeSeconds = 60
 )
 
-$repo = "C:\dev\src\github\WaveRace64-Recomp"
-$llvm = "C:\dev\src\github\Pilotwings64Recomp\portable-llvm\LLVM-19.1.3-Windows-X64\bin"
-$vcvars = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-$env:PATH += ";$llvm"
+# Repo root is this script's parent (scripts/..). Toolchain paths are env-driven:
+#   $env:VCVARS         - path to vcvars64.bat (else vswhere / default install)
+#   $env:WR64_LLVM_BIN  - LLVM bin dir to prepend to PATH (else assume clang on PATH)
+$repo = Split-Path -Parent $PSScriptRoot
+$vcvars = $env:VCVARS
+if (-not $vcvars) {
+    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) { $vcvars = & $vswhere -latest -find "VC\Auxiliary\Build\vcvars64.bat" 2>$null }
+}
+if (-not $vcvars) { $vcvars = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" }
+if ($env:WR64_LLVM_BIN) { $env:PATH += ";$env:WR64_LLVM_BIN" }
 Set-Location $repo
 
 for ($i = 1; $i -le $MaxIterations; $i++) {

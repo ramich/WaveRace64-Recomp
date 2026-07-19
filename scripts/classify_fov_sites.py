@@ -19,7 +19,9 @@ import time
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOML = os.path.join(REPO, "recomp", "waverace64.toml")
 EXE = os.path.join(REPO, "build", "WaveRace64Recomp.exe")
-VCVARS = r"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+_PF86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+VCVARS = os.environ.get("VCVARS") or os.path.join(
+    _PF86, "Microsoft Visual Studio", "2022", "BuildTools", "VC", "Auxiliary", "Build", "vcvars64.bat")
 
 SITES = [
     ("func_8009B910", 0x8009B93C),

@@ -8,9 +8,13 @@ import struct
 import sys
 import re
 import copy
+import os
 
-ROM_PATH = "/home/wacomalt/gemini/Wave-Race-64/baserom.us.rev1.z64"
-SYMS_PATH = "/home/wacomalt/gemini/WaveRace64-Recomp/recomp/waverace64.us.rev1.syms.toml"
+# Paths are repo-relative (this script lives in scripts/); override with the
+# WR64_ROM / WR64_SYMS environment variables if your layout differs.
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROM_PATH = os.environ.get("WR64_ROM", os.path.join(_REPO, "baserom.us.rev1.z64"))
+SYMS_PATH = os.environ.get("WR64_SYMS", os.path.join(_REPO, "recomp", "waverace64.us.rev1.syms.toml"))
 OUTPUT_PATH = SYMS_PATH  # Overwrite in place
 
 def read_rom(path):

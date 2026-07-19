@@ -1,6 +1,10 @@
 @echo off
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-cd /d C:\dev\src\github\WaveRace64-Recomp
+rem Repo root = this script's parent (scripts\..); no hardcoded machine path.
+cd /d "%~dp0.."
+rem Locate vcvars64.bat: honor %VCVARS%, else vswhere, else the default install.
+if not defined VCVARS for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -find "VC\Auxiliary\Build\vcvars64.bat" 2^>nul`) do set "VCVARS=%%i"
+if not defined VCVARS set "VCVARS=%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+call "%VCVARS%" >nul 2>&1
 lib\N64Recomp\build\N64Recomp.exe recomp\waverace64.toml > recomp.log 2>&1
 if errorlevel 1 (echo REBUILD FAILED: N64Recomp step, see recomp.log & exit /b 1)
 rem NOTE (2026-07-16): invoke this script from PowerShell or Python
