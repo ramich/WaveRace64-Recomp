@@ -677,30 +677,18 @@ int main(int argc, char* argv[]) {
         // Not the copyrighted Nintendo logo/artwork — an original evocation.
         menu->set_launcher_background_svg("wr64_background.svg");
 
-        // Original two-tone wordmark title, replacing the plain program-name
-        // text. Our own colors/composition (aqua "WAVE RACE" + orange "64"),
-        // not the game's trademarked logo.
+        // Original wordmark logo (assets/wr64_logo.svg — a Pillow-rendered water
+        // gradient wordmark, our own design/effects with the bundled Lato font;
+        // not the game's trademarked logo or font). Replaces the plain title.
         ContextId ctx = get_launcher_context_id();
         menu->remove_default_title();
-        Element* title_row = ctx.create_element<Element>(menu);
-        title_row->set_position(Position::Absolute);
-        title_row->set_top(20.0f, Unit::Percent);
-        title_row->set_left(50.0f, Unit::Percent);
-        title_row->set_translate_2D(-50.0f, -50.0f, Unit::Percent);
-        title_row->set_display(Display::Flex);
-        title_row->set_flex_direction(FlexDirection::Row);
-        title_row->set_align_items(AlignItems::Center);
-        title_row->set_gap(16.0f);
-
-        auto style_word = [](Label* l, Color c) {
-            l->set_color(c);
-            l->set_font_size(72.0f);
-            l->set_letter_spacing(3.0f);
-        };
-        Label* wave = ctx.create_element<Label>(title_row, std::string("WAVE RACE"), theme::Typography::Header1);
-        style_word(wave, Color{120, 232, 246, 255});   // aqua cyan
-        Label* num = ctx.create_element<Label>(title_row, std::string("64"), theme::Typography::Header1);
-        style_word(num, Color{255, 150, 66, 255});      // warm orange accent
+        Svg* logo = ctx.create_element<Svg>(menu, "wr64_logo.svg");
+        logo->set_position(Position::Absolute);
+        logo->set_top(19.0f, Unit::Percent);
+        logo->set_left(50.0f, Unit::Percent);
+        logo->set_translate_2D(-50.0f, -50.0f, Unit::Percent);
+        logo->set_width(620.0f);   // aspect ~6:1 (1311x220)
+        logo->set_height(104.0f);
 
         // Add options individually (instead of add_default_options()) to omit
         // the Mods entry — Wave Race 64 has no mod support — and brighten the
