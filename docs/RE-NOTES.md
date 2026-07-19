@@ -731,9 +731,19 @@ driven by the launcher **Textures** tab + `WR64_TEXPACK`/`WR64_TEXDUMP`.
   gfx thread) does the actual load/enable/dump so it never races send_dl. The
   Enable checkbox tracks F4 via update_option_value+apply_option_value; the title
   shows the live state.
-- **Rice packs (community hi-res packs, `<rom>#<crc>#<fmt>#<siz>_all.png`):** RT64
-  matches replacements by its OWN hash at runtime and does NOT compute Rice CRCs
-  live (the `.rice.*` dump is only for EXTERNAL Rice-hash generation). So a Rice
-  pack won't auto-load without either (a) runtime Rice-CRC computation added to
-  the upload/replacement path, or (b) an offline rice->rt64 database. IN PROGRESS:
-  adding runtime Rice-hash support to the rt64 fork.
+- **Rice packs — SOLVED 2026-07-18 (no engine change).** Community hi-res packs
+  use Rice naming (`<rom>#<crc>#<fmt>#<siz>_all.png`, often nested). RT64 matches
+  by its OWN hash at runtime and does NOT compute Rice CRCs live, BUT its loader
+  already resolves `autoPath:"rice"` databases: for each `textures[]` entry it
+  finds the file whose parsed rice key == `hashes.rice` and registers it under
+  `hashes.rt64` (resolvePaths, rt64_replacement_database.cpp; FileSystemDirectory
+  recurses subfolders). So the fix is a DATABASE, not runtime code:
+  `scripts/decode_texture_dump.py <dump> --rice <packdir>` computes each dumped
+  texture's rice key (RiceCRC32 ported from RT64's own tools/texture_hasher —
+  validated 23/24 against a real pack; reads .rice.rdram as native LE u32, no
+  byte-swap for 32-bit reads; CI adds `#<paletteCRC>` from CalculateMaxCI*) and
+  writes an `autoPath:rice` rt64.json into the pack folder mapping rice->rt64.
+  Coverage = what's in the dump (a texture maps only if it was dumped); dump more
+  screens/courses and re-run to grow it. Only the hash-index json is written; pack
+  images are referenced in place. RT64's `tools/texture_hasher` (Rice mode) is the
+  upstream equivalent if you'd rather build it.

@@ -9,18 +9,116 @@ format from each `.tile.json`. Writes, under <dump>:
   _index_NN.png      labeled contact sheets (hash under each thumbnail)
   _index.txt         hash -> format WxH listing
 
-Usage:  python scripts/decode_texture_dump.py [dump_dir]   (default: ./textures_dump)
+Usage:
+  python scripts/decode_texture_dump.py [dump_dir]           decode -> PNGs + pack
+  python scripts/decode_texture_dump.py [dump_dir] --rice <pack_dir>
+        Generate a Rice-hash database (rt64.json, autoPath=rice) into <pack_dir>
+        so a community Rice-format pack (files named <rom>#<crc>#<fmt>#<siz>_all.png)
+        loads by mapping each texture's Rice hash to its RT64 hash. Writes only the
+        hash-index json; the pack's images are referenced in place, not copied.
 
 Requires Pillow. Original code; implements the public N64 texture formats
-(RGBA16/32, CI8, IA8/16, I8) and this runtime's 32-bit-word byte-swap.
+(RGBA16/32, CI8, IA8/16, I8), this runtime's 32-bit-word byte-swap, and the Rice
+CRC (ported from RT64's own texture_hasher tool).
 """
-import glob, json, os, sys
+import glob, json, os, struct, sys
 from PIL import Image, ImageDraw, ImageFont
 
-DUMP = sys.argv[1] if len(sys.argv) > 1 else "textures_dump"
+DUMP = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else "textures_dump"
 if not os.path.isdir(DUMP):
-    sys.exit(f"dump directory not found: {DUMP}\n"
-             f"usage: python {os.path.basename(sys.argv[0])} [dump_dir]")
+    sys.exit(f"dump directory not found: {DUMP}")
+
+# ---------------------------------------------------------------------------
+# Rice-hash database mode: --rice <pack_dir>
+# ---------------------------------------------------------------------------
+def rice_crc32(data, width, height, size, row_stride):
+    # Ported from RT64 texture_hasher RiceCRC32. Reads .rice.rdram as native LE
+    # u32 (this runtime's 32-bit reads already yield correct N64 words).
+    crc = 0
+    bpl = (width << size) >> 1
+    for row in range(height):
+        y = height - 1 - row
+        base = row * row_stride
+        esi = 0
+        x = bpl - 4
+        while x >= 0:
+            esi = struct.unpack_from("<I", data, base + x)[0]
+            esi ^= x
+            crc = ((crc << 4) + ((crc >> 28) & 15)) & 0xFFFFFFFF
+            crc = (crc + esi) & 0xFFFFFFFF
+            x -= 4
+        esi ^= (y & 0xFFFFFFFF)
+        crc = (crc + esi) & 0xFFFFFFFF
+    return crc
+
+def rice_key_for(base, tile, w, h):
+    fmt, siz = tile["fmt"], tile["siz"]
+    data = open(base + ".rice.rdram", "rb").read()
+    bpl = (w << siz) >> 1
+    if (h - 1) * bpl + bpl > len(data):
+        return None
+    crc = rice_crc32(data, w, h, siz, bpl)
+    key = f"{crc:08x}#{fmt}#{siz}"
+    # CI textures append a palette CRC (matches RT64 texture_hasher).
+    pal = base + ".rice.palette.rdram"
+    if fmt == 2 and os.path.exists(pal):
+        cimax = max(data[: w * h]) if siz == 1 else 0
+        if siz == 0:  # CI4: max nibble
+            cimax = 0
+            for byte in data[: (w * h + 1) // 2]:
+                cimax = max(cimax, byte >> 4, byte & 0xF)
+        pdata = open(pal, "rb").read()
+        pstride = 32 if siz == 0 else 512
+        pcrc = rice_crc32(pdata, cimax + 1, 1, 2, pstride)
+        key += f"#{pcrc:08x}"
+    return key
+
+if "--rice" in sys.argv:
+    i = sys.argv.index("--rice")
+    if i + 1 >= len(sys.argv):
+        sys.exit("usage: --rice <pack_dir>")
+    pack_dir = sys.argv[i + 1]
+    if not os.path.isdir(pack_dir):
+        sys.exit(f"pack dir not found: {pack_dir}")
+    # rice key -> rt64 hash, from the dump.
+    rice_to_rt64 = {}
+    for tj in glob.glob(os.path.join(DUMP, "*.tile.json")):
+        b = tj[:-len(".tile.json")]
+        rt64 = os.path.basename(b).split(".")[0]
+        t = json.load(open(tj)); tile = t["tile"]; w = t["width"]; h = t["height"]
+        if w <= 0 or h <= 0 or not os.path.exists(b + ".rice.rdram"):
+            continue
+        try:
+            k = rice_key_for(b, tile, w, h)
+        except Exception:
+            k = None
+        if k:
+            rice_to_rt64.setdefault(k, rt64)
+    # Which rice keys does the pack actually provide? Recurse subfolders — RT64
+    # walks the whole tree (recursive_directory_iterator) and keys by filename.
+    provided = set()
+    for f in glob.glob(os.path.join(pack_dir, "**", "*.png"), recursive=True):
+        n = os.path.basename(f); fh = n.find("#"); lu = n.rfind("_")
+        if fh != -1 and lu != -1 and lu > fh:
+            provided.add(n[fh+1:lu].lower())
+    entries = [{"path": "", "hashes": {"rt64": rt64, "rice": k}}
+               for k, rt64 in rice_to_rt64.items() if k in provided]
+    db = {
+        "configuration": {"configurationVersion": 3, "autoPath": "rice",
+                          "defaultOperation": "stream", "defaultShift": "half",
+                          "hashVersion": 5},
+        "textures": entries, "operationFilters": [], "shiftFilters": [], "extraFiles": [],
+    }
+    out = os.path.join(pack_dir, "rt64.json")
+    with open(out, "w") as f:
+        json.dump(db, f, indent=2)
+    print(f"wrote {out}")
+    print(f"pack rice files: {len(provided)}  |  mapped to rt64 hashes: {len(entries)}")
+    missing = provided - set(rice_to_rt64)
+    if missing:
+        print(f"unmatched pack keys ({len(missing)}): {sorted(missing)}")
+    sys.exit(0)
+
 OUT = os.path.join(DUMP, "png")
 os.makedirs(OUT, exist_ok=True)
 

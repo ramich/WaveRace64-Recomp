@@ -41,6 +41,24 @@ folder without `rt64.json` is reported and skipped.
 4. **Drop the finished pack here** (or anywhere) and run with `WR64_TEXPACK`
    pointing at it.
 
+## Using a community Rice-format pack
+
+Many N64 hi-res packs use Rice/GLideN64 naming (`<rom>#<crc>#<fmt>#<siz>_all.png`,
+often in subfolders). RT64 matches replacements by its own hash at runtime, so a
+Rice pack needs a database mapping each texture's Rice hash → its RT64 hash. Build
+one from your dump (RT64 walks subfolders automatically):
+
+```
+# 1. Dump the screens/courses the pack covers (WR64_TEXDUMP=1), then:
+python scripts/decode_texture_dump.py textures_dump --rice "<pack root folder>"
+# 2. Point the Textures tab / WR64_TEXPACK at that pack root folder.
+```
+
+This writes only `rt64.json` (a hash index) into the pack folder; the pack images
+are referenced in place, not copied. Coverage = whatever is in your dump, so dump
+more and re-run to map more. Textures the dump doesn't contain are reported as
+"unmatched".
+
 ## Caveats
 
 - Replacements draw from a VRAM pool alongside the framebuffers. HD textures
