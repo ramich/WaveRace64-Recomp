@@ -629,10 +629,11 @@ int main(int argc, char* argv[]) {
             "Load HD replacement textures from the folder below. Applies live; "
             "you can also toggle replacements in-game with F4.",
             true);
-        tex_cfg.add_string_option("tex_pack_dir", "Texture Pack Folder",
-            "Path to a texture pack folder (contains rt64.json + hash-named "
-            "images). Relative paths are resolved from the game's folder. "
-            "Overridden at launch by the WR64_TEXPACK environment variable.",
+        tex_cfg.add_string_option("tex_pack_dir", "Texture Pack Folder or .zip",
+            "Path to a texture pack — either a folder or a .zip file (both need an "
+            "rt64.json inside, or the Rice database). Relative paths are resolved "
+            "from the game's folder. Overridden at launch by the WR64_TEXPACK "
+            "environment variable.",
             "textures");
         tex_cfg.add_bool_option("tex_dump", "Dump Textures (advanced)",
             "Write every texture the game loads to the 'textures_dump' folder "

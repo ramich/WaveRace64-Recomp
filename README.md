@@ -118,7 +118,7 @@ process left behind.
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
-| `WR64_TEXPACK=<dir>` | Load an RT64 HD texture-replacement pack from `<dir>` (a folder with `rt64.json` + hash-named images) and enable it; toggle live with **F4**. `WR64_TEXPACK=1` = `./textures`. See `textures/README.md` |
+| `WR64_TEXPACK=<path>` | Load an RT64 HD texture-replacement pack from `<path>` — a **folder or a `.zip`** (both need `rt64.json` + hash-named images inside) — and enable it; toggle live with **F4**. `WR64_TEXPACK=1` = `./textures`. See `textures/README.md` |
 | `WR64_TEXDUMP=<dir>` | Dump every texture RT64 loads (hash-named, Rice/TMEM format) into `<dir>` — raw material for building a pack. `WR64_TEXDUMP=1` = `./textures_dump`. See `textures/README.md` |
 
 Keyboard (defaults): WASD = stick, X = A, Z = B, LShift = Z, Return = START,

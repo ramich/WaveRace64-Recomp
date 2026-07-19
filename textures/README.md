@@ -14,9 +14,10 @@ $env:WR64_TEXPACK = "textures"   # this folder; or an absolute path
 .\WaveRace64Recomp.exe
 ```
 
-`WR64_TEXPACK=1` is shorthand for `.\textures`. A pack directory must contain an
-`rt64.json` database plus the replacement image files it references; loading a
-folder without `rt64.json` is reported and skipped.
+`WR64_TEXPACK=1` is shorthand for `.\textures`. The path may be a **folder or a
+`.zip` file** (RT64 reads zips directly). Either must contain an `rt64.json`
+database plus the replacement image files it references; loading one without
+`rt64.json` is reported and skipped.
 
 ## Building a pack (the workflow)
 

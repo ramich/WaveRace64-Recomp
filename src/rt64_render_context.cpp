@@ -117,15 +117,22 @@ static void apply_texture_state_gfx(RT64::Application* app) {
         s_tex_pack_loaded.store(false);
         if (!want_pack.empty()) {
             std::error_code ec;
-            if (std::filesystem::is_directory(want_pack, ec)) {
+            // Accept either a folder or a .zip file — RT64's loader picks
+            // FileSystemZip for a regular file (miniz) and FileSystemDirectory
+            // for a folder. Both need an rt64.json inside (or, for Rice packs,
+            // the Rice database).
+            const bool is_dir = std::filesystem::is_directory(want_pack, ec);
+            const bool is_file = std::filesystem::is_regular_file(want_pack, ec);
+            if (is_dir || is_file) {
                 if (app->textureCache->loadReplacementDirectory(RT64::ReplacementDirectory(want_pack))) {
                     s_tex_pack_loaded.store(true);
-                    fprintf(stderr, "[WR64-TEX] texture pack loaded: %s\n", want_pack.c_str());
+                    fprintf(stderr, "[WR64-TEX] texture pack loaded (%s): %s\n",
+                            is_file ? "zip" : "folder", want_pack.c_str());
                 } else {
                     fprintf(stderr, "[WR64-TEX] texture pack failed to load (no rt64.json?): %s\n", want_pack.c_str());
                 }
             } else {
-                fprintf(stderr, "[WR64-TEX] texture pack dir not found: %s\n", want_pack.c_str());
+                fprintf(stderr, "[WR64-TEX] texture pack not found: %s\n", want_pack.c_str());
             }
         }
     }
