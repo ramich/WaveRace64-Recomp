@@ -687,8 +687,8 @@ int main(int argc, char* argv[]) {
         logo->set_top(19.0f, Unit::Percent);
         logo->set_left(50.0f, Unit::Percent);
         logo->set_translate_2D(-50.0f, -50.0f, Unit::Percent);
-        logo->set_width(620.0f);   // aspect ~6:1 (1311x220)
-        logo->set_height(104.0f);
+        logo->set_width(560.0f);   // aspect ~4.7:1 (1467x312, framed plate)
+        logo->set_height(119.0f);
 
         // Add options individually (instead of add_default_options()) to omit
         // the Mods entry — Wave Race 64 has no mod support — and brighten the
