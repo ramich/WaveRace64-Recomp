@@ -855,11 +855,12 @@ Logs are plain ASCII (grep -a). WR64_FBP_DEBUG=1 dumps per-projection layout.
    the BOTTOM half ghosts. Transient, motion-only; not visible in stills
    (PrintWindow grabs one composited frame). Almost certainly split-viewport
    frame-interpolation (same class as the cloud-stutter thread). Deep.
-2. **2P engine audio absent** — CONFIRMED by ear: the player-engine voice is
-   silent in 2P (music/other audio play at 1P-comparable energy, so it is a
-   specific voice, not total failure). RMS 1P vs 2P nearly identical (3960 vs
-   4114). Root cause is game-side audio-voice allocation (more sources in 2P:
-   two players' engines + opponents + music) or 2P-specific audio logic. The
-   recompiled microcode (rsp/aspMain.cpp) is register-level asm; the real avenue
-   is the decomp (ramich/Wave-Race-64) audio driver + instrumenting the
-   per-frame voice list. Fresh deep investigation.
+
+### NOT a bug: 2P engine audio absent — ORIGINAL GAME BEHAVIOR (closed 2026-07-20)
+The player-engine voice is silent in 2P VS while music/other audio play
+normally. Initially suspected as a port voice-allocation bug (1P vs 2P dump RMS
+nearly identical, 3960 vs 4114 — music masks the missing engine; no RSP
+"unhandled jump target" errors in 2P, so the recompiled microcode path is
+clean). CLOSED: the user reproduced the exact same behavior in an emulator —
+the game itself drops the engine SFX in 2P split-screen (a typical N64
+voice-count/CPU budget cut). As designed; do not chase.
