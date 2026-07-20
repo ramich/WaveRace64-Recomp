@@ -71,17 +71,21 @@ process left behind.
   integrated. Display settings (resolution up to 4x, MSAA, framerate, fullscreen)
   apply live; **controls are fully rebindable** (the port routes input through
   recompinput, so the Controls tab actually takes effect). A game-specific
-  **Enhancements** tab exposes border removal, camera FOV (with a reset-to-45°
-  button), wave-grid size, and an **Unlock All Courses** button (marks every
-  difficulty complete in the EEPROM save — keeps a `.unlock_backup` — applied on
-  next game start). A **Textures** tab enables RT64 HD texture-replacement packs
-  (enable toggle synced with the F4 hotkey, pack-folder path, and a texture-dump
-  toggle for pack authoring — see `textures/README.md`). The Mods tab and
-  launcher entry are removed (Wave
-  Race 64 has no mods). Environment variables below remain as overrides/fallbacks
-  and for dev tooling. **Border removal is boot-time** — toggling it in the
-  launcher takes effect after a restart (the renderer's aspect ratio is fixed at
-  launch; see below)
+  **Enhancements** tab exposes border removal, camera FOV with a real
+  **Reset to 45°** action button, wave-grid size, and an **Unlock** button
+  (marks every difficulty complete in the EEPROM save — keeps a
+  `.unlock_backup` — applied on next game start). A **Textures** tab enables
+  RT64 HD texture-replacement packs (enable toggle synced with the F4 hotkey,
+  pack path with native **Browse Folder…/Browse .zip…** pickers, and a
+  texture-dump toggle for pack authoring — see `textures/README.md`). The
+  action buttons use a new stateless **Button config-option type** added to our
+  librecomp + RecompFrontend forks (upstream had no per-option buttons — only
+  page chrome — hence the old check-a-box-then-Apply hacks; the button label
+  no-wrap fix also resolves upstream RecompFrontend issue #26). The Mods tab
+  and launcher entry are removed (Wave Race 64 has no mods). Environment
+  variables below remain as overrides/fallbacks and for dev tooling. **Border
+  removal is boot-time** — toggling it in the launcher takes effect after a
+  restart (the renderer's aspect ratio is fixed at launch; see below)
 - **Widescreen rough edges** (needs game patches): objects can pop in at the screen
   edges because the game culls against its original frustum — confirmed NOT to
   follow the camera FOV. HUD/menu handling is solved (per-scene presentation below)

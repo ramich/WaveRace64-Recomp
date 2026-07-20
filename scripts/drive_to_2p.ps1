@@ -149,10 +149,12 @@ Start-Sleep -Seconds 2
 Save-WindowShot $hwnd (Join-Path $OutDir '08_maybe_race.png')
 
 # Burst-capture the pre-race FLYBY window (intro camera pan before the
-# countdown), where a lower-half ghosting artifact was reported.
-for ($f = 0; $f -lt 16; $f++) {
+# countdown), where a lower-half ghosting artifact was reported. Tight ~30ms
+# interval so interpolated presents (2 of 3 frames at 60Hz over the 20Hz game)
+# are sampled too, not just game frames.
+for ($f = 0; $f -lt 60; $f++) {
     Save-WindowShot $hwnd (Join-Path $OutDir ("flyby_{0:D2}.png" -f $f))
-    Start-Sleep -Milliseconds 140
+    Start-Sleep -Milliseconds 30
 }
 
 Write-Host "Holding accelerator for $AccelerateSeconds s..."

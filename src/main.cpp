@@ -34,6 +34,7 @@
 #include "recompui/config.h"
 #include "recompinput/input_events.h"
 #include "recompinput/players.h"
+#include "util/file.h"   // recompui folder/file pickers (NFD-backed)
 #include "nfd.h"
 
 // WR64-specific renderer settings exposed by rt64_render_context.cpp.
@@ -570,10 +571,10 @@ int main(int argc, char* argv[]) {
             "Camera FOV in degrees. Default 47.75 (wider than original 45°). "
             "Higher values show more of the scene horizontally.",
             40.0, 75.0, 0.25, 2, false, 47.75);
-        wr64_cfg.add_bool_option("reset_fov", "Reset FOV to Original (45°)",
-            "Check this box and click Apply to reset the Field of View back to "
-            "the original N64 game value of 45°.",
-            false);
+        wr64_cfg.add_button_option("reset_fov", "Reset FOV to Original",
+            "Set the Field of View slider back to the original N64 game value "
+            "of 45°, then press Apply.",
+            "Reset to 45°");
         wr64_cfg.add_enum_option("wave_grid", "Wave Detail Area",
             "How far the detailed foam-water mesh extends into widescreen. "
             "Larger grids fill more of an ultrawide screen at negligible cost.",
@@ -584,40 +585,42 @@ int main(int argc, char* argv[]) {
                 {3u, "widest",   "Widest (32x78)"},
                 {4u, "maximum",  "Maximum (40x96)"},
             }, 1u);
-        wr64_cfg.add_bool_option("unlock_courses", "Unlock All Courses",
-            "Check this box and click Apply to mark every difficulty complete in "
-            "the save file, unlocking all courses in Time Trials. Best done here in "
-            "the launcher before starting the game; it takes effect when the game "
-            "(re)starts. A backup of the previous save is kept.",
-            false);
+        wr64_cfg.add_button_option("unlock_courses", "Unlock All Courses",
+            "Mark every difficulty complete in the save file, unlocking all "
+            "courses in Time Trials. Takes effect when the game (re)starts; "
+            "best pressed before starting the game. A backup of the previous "
+            "save is kept.",
+            "Unlock");
+
+        // Buttons act immediately when pressed (Permanent context; never fired
+        // at config load).
+        wr64_cfg.add_option_change_callback("reset_fov",
+            [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant,
+               recomp::config::OptionChangeContext ctx) {
+                if (ctx == recomp::config::OptionChangeContext::Load) return;
+                // Snap the slider back to 45; lands in the pending (temp) config
+                // so Apply persists it like any manual slider change.
+                recompui::config::get_config("wr64_settings").update_option_value("fov_degrees", 45.0);
+            });
+        wr64_cfg.add_option_change_callback("unlock_courses",
+            [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant,
+               recomp::config::OptionChangeContext ctx) {
+                if (ctx == recomp::config::OptionChangeContext::Load) return;
+                wr64_unlock_all_courses();
+            });
 
         auto apply_wr64 = []() {
             recomp::config::Config& cfg = recompui::config::get_config("wr64_settings");
             wr64_set_show_borders(std::get<bool>(cfg.get_option_value("show_borders")));
 
-            // If the reset checkbox is checked, snap the slider back to 45° and
-            // uncheck the box. update_option_value refreshes the UI so the slider
-            // shows the new value on next open.
-            if (std::get<bool>(cfg.get_option_value("reset_fov"))) {
-                cfg.update_option_value("fov_degrees", 45.0);
-                cfg.update_option_value("reset_fov", false);
-                wr64_set_fov_degrees(45.0f);
-            } else {
-                float fov = static_cast<float>(std::get<double>(cfg.get_option_value("fov_degrees")));
-                wr64_set_fov_degrees(fov);
-            }
+            float fov = static_cast<float>(std::get<double>(cfg.get_option_value("fov_degrees")));
+            wr64_set_fov_degrees(fov);
 
             static constexpr uint32_t rows[] = {19, 23, 27, 32, 40};
             static constexpr uint32_t cols[] = {35, 55, 63, 78, 96};
             uint32_t idx = std::get<uint32_t>(cfg.get_option_value("wave_grid"));
             if (idx >= 5) idx = 1;
             wr64_set_wavegrid(rows[idx], cols[idx]);
-
-            // Unlock-all-courses button: edit the save file, then uncheck.
-            if (std::get<bool>(cfg.get_option_value("unlock_courses"))) {
-                wr64_unlock_all_courses();
-                cfg.update_option_value("unlock_courses", false);
-            }
         };
         wr64_cfg.set_load_callback(apply_wr64);
         wr64_cfg.set_save_callback(apply_wr64);
@@ -635,6 +638,36 @@ int main(int argc, char* argv[]) {
             "from the game's folder. Overridden at launch by the WR64_TEXPACK "
             "environment variable.",
             "textures");
+        tex_cfg.add_button_option("tex_browse_folder", "Browse for Pack Folder",
+            "Pick the texture-pack folder with a file browser. Fills in the path "
+            "above; press Apply to load it.",
+            "Browse Folder…");
+        tex_cfg.add_button_option("tex_browse_zip", "Browse for Pack .zip",
+            "Pick a texture-pack .zip file with a file browser. Fills in the path "
+            "above; press Apply to load it.",
+            "Browse .zip…");
+        tex_cfg.add_option_change_callback("tex_browse_folder",
+            [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant,
+               recomp::config::OptionChangeContext ctx) {
+                if (ctx == recomp::config::OptionChangeContext::Load) return;
+                recompui::file::open_folder_dialog([](bool success, const std::filesystem::path& path) {
+                    if (success) {
+                        recompui::config::get_config("wr64_textures").update_option_value(
+                            "tex_pack_dir", path.string());
+                    }
+                });
+            });
+        tex_cfg.add_option_change_callback("tex_browse_zip",
+            [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant,
+               recomp::config::OptionChangeContext ctx) {
+                if (ctx == recomp::config::OptionChangeContext::Load) return;
+                recompui::file::open_file_dialog([](bool success, const std::filesystem::path& path) {
+                    if (success) {
+                        recompui::config::get_config("wr64_textures").update_option_value(
+                            "tex_pack_dir", path.string());
+                    }
+                });
+            });
         tex_cfg.add_bool_option("tex_dump", "Dump Textures (advanced)",
             "Write every texture the game loads to the 'textures_dump' folder "
             "(raw N64 format). Decode them into editable PNGs + a loadable pack "

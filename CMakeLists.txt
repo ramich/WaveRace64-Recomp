@@ -241,6 +241,7 @@ if (RECOMP_FRONTEND_PATH)
     target_compile_definitions(WaveRace64Recomp PRIVATE HAS_RECOMPUI=1)
     target_include_directories(WaveRace64Recomp PRIVATE
         "${RECOMP_FRONTEND_PATH}/recompui/include"
+        "${RECOMP_FRONTEND_PATH}/recompui/src"
         "${RECOMP_FRONTEND_PATH}/recompinput/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64/src/contrib/nativefiledialog-extended/src/include"
     )
