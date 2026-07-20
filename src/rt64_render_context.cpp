@@ -55,6 +55,7 @@ extern "C" void rt64_wr64_set_wide_world(int enabled);
 // 2P split-screen band blackout: poll the split-half draw counter + the two
 // play bands and set the persistent present blit bands (see
 // rt64_framebuffer_renderer.cpp / rt64_vi_renderer.cpp).
+extern "C" void rt64_wr64_set_vertex_interp(int enabled);
 extern "C" uint32_t rt64_wr64_split_half_draws();
 extern "C" float rt64_wr64_split_band_a0();
 extern "C" float rt64_wr64_split_band_a1();
@@ -770,6 +771,30 @@ public:
                 s_tex_dump_enabled.store(true);
             }
             s_tex_dirty.store(true);  // first update_screen applies it
+        }
+
+        // ---- Vertex-position interpolation for CPU-animated meshes ----
+        // WR64's clouds regenerate their vertex data every 20 Hz game frame
+        // under static transforms, so they snap while the rest of the frame
+        // interpolates at high FPS (the "cloud stutter"). RT64's per-vertex
+        // velocity path handles this generically; our fork exposes it for
+        // non-extended-GBI games with a MAX-VERTEX-COUNT threshold: small
+        // drifting quads (clouds/sprites, 4-14 verts) interpolate, while the
+        // camera-anchored wave-mesh chunks (350-870 verts) stay snapped —
+        // their vertices aren't persistent world points, and interpolating
+        // them warps the wave animation (user-verified). WR64_VTXINTERP:
+        // unset/1 = default threshold 64; 0 = off; other N = threshold N.
+        {
+            const char* vi_env = std::getenv("WR64_VTXINTERP");
+            int max_verts = 64;
+            if (vi_env && vi_env[0] != '\0') {
+                const int parsed = std::atoi(vi_env);
+                max_verts = (parsed == 1) ? 64 : parsed;
+            }
+            rt64_wr64_set_vertex_interp(max_verts);
+            if (max_verts > 0) {
+                fprintf(stderr, "[WR64] vertex interpolation enabled (max %d verts per transform)\n", max_verts);
+            }
         }
 
         printf("[WR64-RT64] Renderer context created (result=%d, api=%d)\n",

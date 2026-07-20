@@ -39,16 +39,11 @@ NTSC-U widescreen code patches their high halfwords to 0x3FE3 (1.7777 = 16:9):
 - Recomp-native path: RT64 transform interpolation at display refresh rate
   (`WR64_HIGHFPS=1`, experimental) — the Zelda64Recomp approach, no logic change.
   **User-verified working** (2026-07-15): motion is smooth at display rate.
-- **Known artifact: stuttering clouds — CONFIRMED STRUCTURAL (2026-07-15).**
-  RT64 interpolates by matching *transforms* (worldTransforms + RigidBody lerp,
-  rt64_game_frame.cpp). Billboard clouds regenerate their vertex data per game
-  frame under a static transform, and RT64's vertex-level velocity interpolation
-  is an unimplemented TODO (rt64_game_frame.cpp ~1012: "TODO: Compute the velocity
-  buffer"). No config or tagging fixes this today. Real fix routes, both major:
-  (a) implement vertex-velocity interpolation in RT64 (upstream contribution that
-  would benefit every recomp), or (b) game-patch the cloud renderer to draw
-  matrix-transformed quads instead of world-space billboards (requires finding the
-  sky renderer). Parked as a documented limitation of WR64_HIGHFPS.
+- **Stuttering clouds — SOLVED 2026-07-20** (the 2026-07-15 "unimplemented
+  TODO / structural" conclusion was WRONG — see "Cloud stutter — SOLVED" below
+  for the correction and fix; the short version: RT64's per-vertex velocity
+  machinery is complete, it is merely gated off by the default TransformGroup,
+  and our fork opens the gate with a vertex-count threshold).
 - True logic-rate change would need the physics timestep and frame counters
   found and patched — major RE effort.
 
@@ -615,7 +610,7 @@ the margins (sky/water instead of black) because Expand rendering persisted.
 Lesson: with a fixed-at-boot aspect, don't try to make it look right live —
 make it correct on restart and say so.
 
-## Frame interpolation & the cloud stutter — INVESTIGATED (2026-07-18), unresolved
+## Frame interpolation & the cloud stutter — INVESTIGATED (2026-07-18); SOLVED 2026-07-20 (see the SOLVED section below)
 
 Goal: fix the `WR64_HIGHFPS=1` cloud stutter. Two parallel investigations
 (RT64 internals + decomp) established:
@@ -904,3 +899,42 @@ menus are crop-off, unaffected. Method note: scripts/drive_to_2p.ps1 now
 respects a caller-set WR64_BORDERS=1 for stock-mode ground-truth captures, and
 the measurement lives in the session scratchpad (measure_craft.py pattern:
 segment the black preview boxes, bbox the colored craft, normalize by box).
+
+## Cloud stutter — SOLVED (2026-07-20): the velocity gate, and a vertex-count threshold
+
+The high-FPS cloud stutter is fixed (user-verified: clouds smooth, water
+unchanged). Two prior conclusions corrected:
+
+- WRONG (2026-07-15): "vertex-level velocity interpolation is an unimplemented
+  TODO". That TODO is in the COMMENTED-OUT reference block of
+  rt64_game_frame.cpp. The ACTIVE matchTransform (~:790) computes per-vertex
+  velocities generically: matched transform + equal vertex counts + changed
+  position hash => velFloats = cur - prev, uploaded and consumed by the
+  shaders. No extended GBI required for the mechanism itself.
+- The real gate: the default `TransformGroup` has `vertexInterpolation =
+  G_EX_COMPONENT_SKIP` (rt64_transform_group.h) while every other component
+  defaults AUTO. Games without the extended GBI use exactly ONE transform
+  group — the default pushed at workload reset (rt64_workload.cpp) — so their
+  regenerated-vertex meshes never interpolate. That is the precise meaning of
+  the earlier "wired but unfed".
+
+Fix (rt64 8dbccbf): fork hook `rt64_wr64_set_vertex_interp(maxVerts)` — the
+workload's default group gets `vertexInterpolation = INTERPOLATE`, and
+rt64_game_frame.cpp skips velocity for transforms with more than `maxVerts`
+vertices. The threshold is essential, discovered the hard way:
+
+- First attempt interpolated EVERYTHING with changing vertices. Clouds fixed —
+  but the WATER broke (user-caught): the wave grid is CAMERA-ANCHORED (it
+  follows the craft), so vertex (r,c) is a grid slot, not a persistent world
+  point; interpolating blends wave heights of different world positions and
+  the animation warps/stutters.
+- Telemetry (`WR64_VTXINTERP_DEBUG=1`, logs per-transform vertex count + max
+  delta) showed a clean split: wave-mesh chunks are 350-870 verts per
+  transform; the drifting cloud/sprite quads are 4-14 (48 max). Threshold 64
+  separates them exactly.
+
+Port default: ON with threshold 64 (`WR64_VTXINTERP`: 0 = off, 1/unset = 64,
+other N = threshold N; rt64_render_context.cpp ctor). General lesson for other
+recomps: this is likely THE generic fix for "CPU-animated billboard stutter"
+under RT64 interpolation — enable vertex interpolation with a size threshold
+that excludes camera-anchored/regenerated-topology meshes.

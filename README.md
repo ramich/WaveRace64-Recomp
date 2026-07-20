@@ -118,7 +118,8 @@ process left behind.
 | `WR64_WINDOW=WxH` | Startup window size override (e.g. `1600x900`) |
 | `WR64_HUD=stretch` | Stretch all 2D (HUD and menus) with the window in widescreen instead of keeping it proportional/centered (default: centered; the centered mode relies on border removal — the default — for RT64's compensation to engage). A third mode — proportional elements anchored to the window edges — needs per-element extended-GBI tagging (future game patches) |
 | `WR64_FB_DUMP=1` | Dump the 320x240 framebuffer to `fb_dump*.bin` at ~10/30/50s (`scripts/measure_borders.py`) |
-| `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. Works; known artifact: **clouds stutter**. RT64 interpolates matrices and tile/UV scroll but has no active per-vertex velocity path (it needs extended-GBI motion the game never emits), so any mesh whose vertices/texture-segments regenerate under a static transform is held then snapped. The exact cloud motion (vertex regen vs texture-segment page-flip) is still being pinned — the sky renderer lives in undecompiled asm (`func_8006E674`). See `docs/RE-NOTES.md` |
+| `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. The former **cloud stutter** artifact is fixed (see `WR64_VTXINTERP` below). See `docs/RE-NOTES.md` |
+| `WR64_VTXINTERP=N` | Per-vertex interpolation for small CPU-animated meshes at high FPS — this is what makes the **drifting clouds smooth** instead of snapping at 20 Hz. The value is a max-vertex-count threshold per transform: default **64** (unset or `1`), `0` disables. The threshold keeps the camera-anchored wave mesh (350–870 verts) on its original snapped animation — interpolating it warps the water. `WR64_VTXINTERP_DEBUG=1` logs per-transform velocity stats. See RE-NOTES "Cloud stutter — SOLVED" |
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
@@ -382,7 +383,7 @@ WaveRace64-Recomp/
 
 ### Phases 7-8: Enhancements & Release
 - [x] Widescreen (3D expand; per-scene presentation keeps 2D menus at 4:3)
-- [x] High-FPS presentation (`WR64_HIGHFPS=1`, interpolated; clouds stutter known)
+- [x] High-FPS presentation (`WR64_HIGHFPS=1`, interpolated; cloud stutter fixed via `WR64_VTXINTERP`)
 - [ ] Border removal endgame (culling frustum + wave-grid, see `docs/RE-NOTES.md`)
 - [ ] HD texture support
 - [ ] Release packaging
