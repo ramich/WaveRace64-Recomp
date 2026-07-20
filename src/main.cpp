@@ -684,11 +684,16 @@ int main(int argc, char* argv[]) {
         menu->remove_default_title();
         Svg* logo = ctx.create_element<Svg>(menu, "wr64_logo.svg");
         logo->set_position(Position::Absolute);
-        logo->set_top(19.0f, Unit::Percent);
+        logo->set_top(23.0f, Unit::Percent);
         logo->set_left(50.0f, Unit::Percent);
         logo->set_translate_2D(-50.0f, -50.0f, Unit::Percent);
         logo->set_width(560.0f);   // aspect ~4.7:1 (1467x312, framed plate)
         logo->set_height(119.0f);
+
+        // Nudge the whole options list up a little (Center layout anchors it by
+        // bottom%, so raise that — do NOT set_translate_2D here, that would clobber
+        // the layout's -50% X centering and shove the list to the right).
+        options->set_bottom(30.0f, Unit::Percent);
 
         // Add options individually (instead of add_default_options()) to omit
         // the Mods entry — Wave Race 64 has no mod support — and brighten the

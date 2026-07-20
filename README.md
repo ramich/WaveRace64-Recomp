@@ -252,6 +252,39 @@ cd ../..
 
 The recompiler reads `baserom.us.rev1.z64` and `recomp/waverace64.us.rev1.syms.toml`, then outputs recompiled C code to `RecompiledFuncs/`.
 
+## Releases & Distribution
+
+A prebuilt binary can be distributed **without ever shipping any Nintendo
+content** — the same model used by [Zelda64Recomp](https://github.com/Zelda64Recomp/Zelda64Recomp),
+[BanjoRecomp](https://github.com/BanjoRecomp/BanjoRecomp), and the other
+N64Recomp ports. Two facts make this work:
+
+- **The binary contains recompiled *code*, never game *assets*.** N64Recomp
+  statically translates the game's MIPS code to C at build time, and that C is
+  compiled into the executable. The recompiled C (`RecompiledFuncs/`) is
+  generated during the build and is **not committed** to the repo. Game
+  *assets* — textures, audio, models, level and course data, text — are never
+  copied out of the ROM and never end up in the binary or the release.
+- **Assets are read from the user's own ROM at runtime.** The player supplies
+  their own legally-obtained Wave Race 64 (USA Rev 1) ROM through the launcher
+  (**Start / Load ROM**). The launcher validates the SHA-1, stores the ROM, and
+  loads every asset from it. A downloaded release with no ROM prompts for one on
+  first launch — nothing is playable until the user provides their copy.
+
+A release archive therefore contains only: the executable, its runtime DLLs
+(SDL2, dxcompiler, dxil, and the MSVC runtime on Windows), and the port's *own*
+`assets/` (launcher art, fonts, controller database). No ROM, no game assets.
+
+**Building still requires the ROM.** The recompiler must read it to generate the
+C, so any build machine — including a CI runner that produces release binaries —
+needs the ROM. The standard approach for automated release builds is to keep the
+ROM in a **private repository** and have the build job check it out with a
+scoped token (never committing it to the public repo and never attaching it to
+the release). WR64's symbols (`recomp/waverace64.us.rev1.syms.toml`) are already
+public and committed, so the ROM is the only private input required. A GitHub
+Actions release workflow along these lines is planned (Phase 8) but not yet
+added.
+
 ## Project Structure
 
 ```
@@ -378,7 +411,14 @@ WaveRace64-Recomp/
 
 ## Legal
 
-This project does **not** contain any Nintendo copyrighted code or assets. You must provide your own legally-obtained ROM file to use this software.
+This project and any binaries built from it do **not** contain any Nintendo
+copyrighted assets — no textures, audio, models, level/course data, or text.
+Those are read at runtime from a ROM you must **legally own and provide
+yourself**. The repository does not include the ROM, and the generated
+recompiled C (`RecompiledFuncs/`) is not committed. This is the same
+distribution model used by other N64Recomp ports (Zelda64Recomp, BanjoRecomp);
+it has not been tested in court and is provided without warranty — use it with
+your own copy of the game.
 
 ## License
 

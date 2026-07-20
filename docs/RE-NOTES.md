@@ -747,3 +747,53 @@ driven by the launcher **Textures** tab + `WR64_TEXPACK`/`WR64_TEXDUMP`.
   screens/courses and re-run to grow it. Only the hash-index json is written; pack
   images are referenced in place. RT64's `tools/texture_hasher` (Rice mode) is the
   upstream equivalent if you'd rather build it.
+
+## Distributable releases (how the ROM-less binary works) — 2026-07-19
+
+Studied BanjoRecomp v1.0.1 to answer "how do they ship a compiled release?"
+(clone at `C:\dev\src\github\BanjoRecomp`). The whole N64Recomp family
+(Zelda64Recomp, BanjoRecomp, us) uses the same model:
+
+- **The binary contains recompiled *code*, never game *assets*.** N64Recomp
+  translates the MIPS code → C at build time; that C compiles into the exe. The
+  generated C (`RecompiledFuncs/`) is `.gitignore`d — regenerated each build,
+  never committed. Assets (textures/audio/models/course data/text) are never
+  extracted; they stay in the ROM.
+- **Assets are read from the user's own ROM at runtime.** The player supplies a
+  legally-owned ROM through the launcher (`add_start_game_or_load_rom_option()`,
+  RecompFrontend — WR64 already wires this at main.cpp). It validates the SHA-1,
+  stores the ROM, and loads assets from it. A downloaded exe with no ROM prompts
+  on first launch.
+- **Building still needs the ROM** — the "no ROM to build" claim is a
+  misconception. BanjoRecomp's BUILDING.md requires a decompressed ROM to run
+  N64Recomp. Their CI gets it via the **private-repo trick**: every job in
+  `.github/workflows/validate.yml` has a `Get extra dependencies` step that
+  `actions/checkout`s a *private* repo (`secrets.SECRET_NAME` + `SECRET_TOKEN`)
+  into `extra/`, then `cp extra/* .` before running the recompiler. The ROM lives
+  only in that private repo + transiently on the runner — never in the public
+  repo or the release artifact. Their syms are a public submodule
+  (`BanjoRecompSyms`); ours (`recomp/waverace64.us.rev1.syms.toml`) are committed
+  too, so the ROM is the ONLY private input we'd need.
+- **Release archive contents:** exe + runtime DLLs (SDL2/dxcompiler/dxil + MSVC
+  runtime on Windows) + the port's *own* `assets/` (launcher art/fonts/controller
+  db). No ROM, no game assets. Our `dist/` layout already matches this.
+- **Legal posture** (theirs and ours, not legal advice): recompiled code treated
+  as transformative, assets never shipped, user must own the ROM. Untested in
+  court. Documented in README "Releases & Distribution" + "Legal".
+- **NEXT (Phase 8):** a GitHub Actions workflow mirroring Banjo's — build
+  N64Recomp/RSPRecomp, pull ROM from a private repo via secrets, recompile,
+  build with portable LLVM, package the `dist/` file set, attach to a tag.
+
+## Windows app-icon embedding trap — 2026-07-19
+
+Regenerating `resources/wr64.ico` alone did NOT change the icon embedded in the
+exe, even though the exe relinked. Cause: `llvm-rc`'s dependency scan doesn't
+look *inside* `wr64.rc` to see the `ICON "wr64.ico"` it references, so CMake/ninja
+only recompile the resource when the `.rc` *source* changes — not when the `.ico`
+changes. The exe kept relinking against a stale `wr64.rc.res`. Fix (CMakeLists,
+WIN32 block): `set_source_files_properties(resources/wr64.rc PROPERTIES
+OBJECT_DEPENDS ".../resources/wr64.ico")` so the icon is always re-embedded when
+it changes. To force once: delete `build/CMakeFiles/WaveRace64Recomp.dir/
+resources/wr64.rc.res` and rebuild. Also note Windows caches exe icons in
+Explorer/taskbar — `ie4uinit.exe -show` (or clearing `IconCache.db`) to refresh
+the shell even after the exe is correct.

@@ -205,6 +205,11 @@ set(WR64_SOURCES
 # Embed the Windows application icon.
 if (WIN32)
     list(APPEND WR64_SOURCES resources/wr64.rc)
+    # llvm-rc's dependency scan doesn't see the .ico referenced inside the .rc,
+    # so regenerating wr64.ico alone won't retrigger the resource compile. Make
+    # the dependency explicit so the icon is always re-embedded when it changes.
+    set_source_files_properties(resources/wr64.rc PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/wr64.ico")
 endif()
 
 add_executable(WaveRace64Recomp ${WR64_SOURCES})
