@@ -52,6 +52,15 @@ extern "C" void rt64_wr64_set_scissor_widen_mask(uint32_t mask);
 extern "C" uint32_t rt64_wr64_scissor_match_count();
 extern "C" void rt64_wr64_set_viewport_widen(int enabled);
 extern "C" void rt64_wr64_set_wide_world(int enabled);
+// 2P split-screen band blackout: poll the split-half draw counter + the two
+// play bands and set the persistent present blit bands (see
+// rt64_framebuffer_renderer.cpp / rt64_vi_renderer.cpp).
+extern "C" uint32_t rt64_wr64_split_half_draws();
+extern "C" float rt64_wr64_split_band_a0();
+extern "C" float rt64_wr64_split_band_a1();
+extern "C" float rt64_wr64_split_band_b0();
+extern "C" float rt64_wr64_split_band_b1();
+extern "C" void rt64_wr64_set_split_bands(float a0, float a1, float b0, float b1);
 
 // ---------------------------------------------------------------------------
 // Static dummy buffers required by RT64 (must persist for the lifetime of app)
@@ -953,6 +962,27 @@ public:
                         // in-flight queues, without it the differently-sized
                         // stale targets ghost through the menu.
                         rt64_wr64_set_present_crop43(wanted == 0 ? 1 : 0);
+                    }
+                }
+
+                // 2P split-screen band blackout: if the renderer drew a split
+                // half since the last frame, we're in a split-screen race — set
+                // the persistent present to blit only the two play bands,
+                // blacking the top/mid/bottom border gutters (where the shared
+                // start-gate/countdown/water passes spill). Otherwise restore
+                // the single full-height band. Persistent (not per-present) so
+                // interpolated frames above the 20 Hz game rate don't flicker.
+                {
+                    static uint32_t s_last_split_draws = 0;
+                    const uint32_t split_draws = rt64_wr64_split_half_draws();
+                    const bool split_active = (split_draws != s_last_split_draws);
+                    s_last_split_draws = split_draws;
+                    if (split_active) {
+                        rt64_wr64_set_split_bands(
+                            rt64_wr64_split_band_a0(), rt64_wr64_split_band_a1(),
+                            rt64_wr64_split_band_b0(), rt64_wr64_split_band_b1());
+                    } else {
+                        rt64_wr64_set_split_bands(0.0f, 1.0f, 0.0f, 0.0f);
                     }
                 }
 
