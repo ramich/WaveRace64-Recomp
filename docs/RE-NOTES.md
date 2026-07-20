@@ -850,11 +850,29 @@ the window overrides the keyboard highlight and Enter selects the wrong item.
 Menu order CHAMPIONSHIP/TIME TRIALS/STUNT MODE/2P VS/OPTIONS (2P VS = Down x3).
 Logs are plain ASCII (grep -a). WR64_FBP_DEBUG=1 dumps per-projection layout.
 
-### KNOWN-ISSUES (confirmed + characterized, not yet fixed)
-1. **Flyby lower-half ghosting** — during the fast pre-race intro camera pan,
-   the BOTTOM half ghosts. Transient, motion-only; not visible in stills
-   (PrintWindow grabs one composited frame). Almost certainly split-viewport
-   frame-interpolation (same class as the cloud-stutter thread). Deep.
+### Flyby lower-half ghosting — SOLVED (2026-07-20): scene cross-matching
+During the fast pre-race intro pan the BOTTOM half ghosted (motion-only,
+invisible in stills — user-verified live). Root cause found by instrumenting
+rt64's scene matching (WR64_MATCH_DEBUG=1, TEMP logging in
+rt64_game_frame.cpp matchScenes): frame interpolation pairs current scenes to
+previous scenes greedily by camera-matrix similarity — and during the flyby the
+two halves' cameras traverse the SAME path offset in time, so the trailing
+camera's current matrix is genuinely CLOSER to the leading camera's PREVIOUS
+matrix (measured cross-pair diff ~130-270) than to its own previous (~313).
+Greedy latched the wrong pairs ((2<-0)/(0<-2) sustained across the flyby) and
+the displaced scene interpolated between wildly different cameras (diff
+540-780) => ghost. No similarity bias can fix this — the wrong pair really is
+closer. Fix (rt64 fork rt64_game_frame.cpp): when cur/prev scene COUNTS are
+equal, pair scenes BY ORDER (WR64 builds scenes in a fixed draw order every
+frame); greedy similarity remains as the fallback for count transitions.
+Verified: 1983 by-order pairings, zero cross-pairs, and the user confirmed the
+flyby is clean by eye. 1P unaffected (single world scene pairs 0<->0 as
+before). A first attempt (1.25x penalty on out-of-order pairs) was
+insufficient — kept in the greedy fallback as a mild bias. WR64_MATCH_DEBUG=1
+stays available for future interpolation hunts.
+
+### KNOWN-ISSUES
+(none currently for 2P split-screen)
 
 ### NOT a bug: 2P engine audio absent — ORIGINAL GAME BEHAVIOR (closed 2026-07-20)
 The player-engine voice is silent in 2P VS while music/other audio play
