@@ -797,3 +797,69 @@ it changes. To force once: delete `build/CMakeFiles/WaveRace64Recomp.dir/
 resources/wr64.rc.res` and rebuild. Also note Windows caches exe icons in
 Explorer/taskbar — `ie4uinit.exe -show` (or clearing `IconCache.db`) to refresh
 the shell even after the exe is correct.
+
+## 2P VS split-screen widescreen — SOLVED (2026-07-20), two known-issues remain
+
+The widescreen/border work was all tuned for 1P (one full-screen viewport). 2P
+VS split-screen renders as TWO full-width, HALF-height, border-inset perspective
+viewports (top scissor `(32,48,1244,480)`, bottom `(32,488,1244,916)`, race cam
+m11=1.043900 ~87deg; fbPair scissor is the FULL frame `(0,0,1280,960)`). The
+scene classifier already handled 2P correctly (race->wide, menu->menu); the
+fixes were all in the rt64 render layer. Commits: rt64 1e023e1 + 518f5b1;
+superproject bbc27f9 + 7a1ca8d.
+
+- **Fills the width (rt64_framebuffer_renderer.cpp):** the stock wide-viewport
+  test requires the projection to cover the whole fbPair width, which the
+  border-inset halves fail, so they never widened (race stuck 4:3, flickering
+  margins). Added `wr64SplitHalf` detection — near-full-width (within pairW/12)
+  AND height in a tight band around HALF the frame (38-55%) AND flush-top or
+  starting ~mid — and put it on the wide path. Full-height 1P views never match.
+- **Correct proportions (rt64_projection_processor.cpp):** the inset half also
+  failed the stock coversWholeWidth gate that drives the horizontal-FOV widening,
+  so its 4:3 world was STRETCHED to fill the wide half (fat riders). Give the
+  split half the SAME widening a 1P full-frame view gets (`1/aspectRatioScale`).
+  CRITICAL: an EXTRA projH/pairH factor (tried first, "widen more because the
+  half is 2x wider aspect") OVER-widens (thin/stretched riders) — the game
+  already compensates its split-screen vertical FOV, so no extra. Verified by an
+  empirical WR64_SPLIT_FOV sweep. Crop-gated (never touches menus).
+- **Gutter garbage + divider seam (rt64_vi_renderer.cpp):** shared full-frame
+  passes (start-gate arch, countdown lights, water) spill into the border bands
+  ABOVE the top half, BETWEEN the halves, and BELOW the bottom half. Fix: the VI
+  present blits ONLY the two play bands as separate scissored draws, leaving
+  top/mid/bottom as the pre-cleared black swap chain. CRITICAL: must be
+  PERSISTENT state (port sets it each game frame from a split-half draw counter,
+  clears otherwise), NOT one-shot — the game runs 20 Hz but presents higher with
+  interpolation, and a one-shot reset-per-present left interpolated frames
+  ungutted => flicker. Default single full band = ordinary present (1P intact).
+- **Craft-select edge leak (rt64_vi_renderer.cpp):** parked-world craft sit at
+  the extreme 4:3 frame edge (overscan margin) in the 2P watercraft-select; our
+  exact 4:3 crop exposes them (aspect-dependent as the crop edge lands sub-pixel
+  in/out). Fix: ~8% overscan zoom on cropped-menu present (enlarge the blit about
+  its center). Menu panels live inside the overscan-safe area, nothing clipped.
+- **Retire crashes:** retiring from a 2P race chained "Failed to find function"
+  at 0x8009A764 then 0x8009A818 — indirect-call targets the JAL scan missed.
+  Split both (find_indirect_targets.py --split). More may surface on other exits.
+
+### 2P automation (scripts/drive_to_2p.ps1, scripts/log_keys.ps1)
+CRITICAL launcher/input facts (else the driver silently lands in the wrong
+mode): the RecompFrontend launcher is up FIRST — ONE Enter starts the game (first
+item pre-highlighted; behaviour has varied, watch for it). The active control
+map is A=Space, stick=WASD (S=down); X is unbound. MUST park the mouse in a
+corner (SetCursorPos 0,0) — RecompFrontend highlights on HOVER, so a cursor over
+the window overrides the keyboard highlight and Enter selects the wrong item.
+Menu order CHAMPIONSHIP/TIME TRIALS/STUNT MODE/2P VS/OPTIONS (2P VS = Down x3).
+Logs are plain ASCII (grep -a). WR64_FBP_DEBUG=1 dumps per-projection layout.
+
+### KNOWN-ISSUES (confirmed + characterized, not yet fixed)
+1. **Flyby lower-half ghosting** — during the fast pre-race intro camera pan,
+   the BOTTOM half ghosts. Transient, motion-only; not visible in stills
+   (PrintWindow grabs one composited frame). Almost certainly split-viewport
+   frame-interpolation (same class as the cloud-stutter thread). Deep.
+2. **2P engine audio absent** — CONFIRMED by ear: the player-engine voice is
+   silent in 2P (music/other audio play at 1P-comparable energy, so it is a
+   specific voice, not total failure). RMS 1P vs 2P nearly identical (3960 vs
+   4114). Root cause is game-side audio-voice allocation (more sources in 2P:
+   two players' engines + opponents + music) or 2P-specific audio logic. The
+   recompiled microcode (rsp/aspMain.cpp) is register-level asm; the real avenue
+   is the decomp (ramich/Wave-Race-64) audio driver + instrumenting the
+   per-frame voice list. Fresh deep investigation.
