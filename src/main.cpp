@@ -601,12 +601,20 @@ int main(int argc, char* argv[]) {
                 // Snap the slider back to 45; lands in the pending (temp) config
                 // so Apply persists it like any manual slider change.
                 recompui::config::get_config("wr64_settings").update_option_value("fov_degrees", 45.0);
+                recompui::config::show_notification(recompui::config::NotificationType::Info,
+                    "Field of View set to 45° — press Apply to save.");
             });
         wr64_cfg.add_option_change_callback("unlock_courses",
             [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant,
                recomp::config::OptionChangeContext ctx) {
                 if (ctx == recomp::config::OptionChangeContext::Load) return;
-                wr64_unlock_all_courses();
+                if (wr64_unlock_all_courses()) {
+                    recompui::config::show_notification(recompui::config::NotificationType::Success,
+                        "All courses unlocked — takes effect when the game (re)starts.");
+                } else {
+                    recompui::config::show_notification(recompui::config::NotificationType::Error,
+                        "Unlock failed — no save file yet? Start the game once first.");
+                }
             });
 
         auto apply_wr64 = []() {
@@ -654,6 +662,8 @@ int main(int argc, char* argv[]) {
                     if (success) {
                         recompui::config::get_config("wr64_textures").update_option_value(
                             "tex_pack_dir", path.string());
+                        recompui::config::show_notification(recompui::config::NotificationType::Info,
+                            "Pack folder selected — press Apply to load it.");
                     }
                 });
             });
@@ -665,6 +675,8 @@ int main(int argc, char* argv[]) {
                     if (success) {
                         recompui::config::get_config("wr64_textures").update_option_value(
                             "tex_pack_dir", path.string());
+                        recompui::config::show_notification(recompui::config::NotificationType::Info,
+                            "Pack .zip selected — press Apply to load it.");
                     }
                 });
             });
