@@ -864,3 +864,25 @@ nearly identical, 3960 vs 4114 — music masks the missing engine; no RSP
 clean). CLOSED: the user reproduced the exact same behavior in an emulator —
 the game itself drops the engine SFX in 2P split-screen (a typical N64
 voice-count/CPU budget cut). As designed; do not chase.
+
+## Menu craft-preview aspect — SOLVED (2026-07-20): the double-squeeze
+
+In widescreen (Expand + menu crop), the watercraft-select's four upper preview
+craft rendered too NARROW (looked "vertically stretched"). Measured against
+stock (WR64_BORDERS=1): craft bbox aspect 1.00 vs 1.79, height identical, width
+0.560x — exactly 1/1.8 = one extra aspect factor at a 1920x800 window. Cause:
+those craft draw under a perspective projection whose scissor covers the whole
+menu fbPair, so rt64's projection processor FOV-widened its matrix (x *= 1/ars)
+— and the crop43 design forces everything onto the squeezed path, which applies
+screenScale.x = 1/ars AGAIN. Net (1/ars)^2: one squeeze correct, one distortion.
+The RIDER preview was always right because its projection doesn't cover the
+pair width (no FOV adjust -> single squeeze). This was introduced by the crop43
+design (dcf7b42) as the lesser evil vs the old wide-path "floating jetskis in
+the margins". Fix (rt64 cd88585, rt64_projection_processor.cpp): while
+present-crop is active, skip the FOV adjustment for perspective projections —
+the single squeeze is then the correct 4:3 placement. Verified by measurement
+(normalized craft aspect 1.019 vs stock 1.000) and visually; gameplay and wide
+menus are crop-off, unaffected. Method note: scripts/drive_to_2p.ps1 now
+respects a caller-set WR64_BORDERS=1 for stock-mode ground-truth captures, and
+the measurement lives in the session scratchpad (measure_craft.py pattern:
+segment the black preview boxes, bbox the colored craft, normalize by box).

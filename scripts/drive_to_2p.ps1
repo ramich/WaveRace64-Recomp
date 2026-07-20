@@ -82,7 +82,7 @@ function Save-WindowShot([IntPtr]$hwnd, [string]$path) {
     Write-Host "saved $path"
 }
 
-$env:WR64_BORDERS = '0'
+if (-not $env:WR64_BORDERS) { $env:WR64_BORDERS = '0' }   # respect caller override (1 = stock mode)
 $env:WR64_SCENE_DEBUG = '1'
 $env:WR64_FBP_DEBUG = '1'
 $env:WR64_WINDOW = '1920x800'
