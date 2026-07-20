@@ -938,3 +938,34 @@ other N = threshold N; rt64_render_context.cpp ctor). General lesson for other
 recomps: this is likely THE generic fix for "CPU-animated billboard stutter"
 under RT64 interpolation — enable vertex interpolation with a size threshold
 that excludes camera-anchored/regenerated-topology meshes.
+
+## Wave-mesh interpolation — EXPERIMENTAL (2026-07-20), launcher "Smooth Water"
+
+Follow-up to "Cloud stutter — SOLVED": can the WATER also interpolate at high
+FPS? Vertex dumps (TEMP WR64_VTXDUMP=1 in rt64_game_frame.cpp, analyzed
+offline) show the wave grid is a RIGID BODY in XZ frame-to-frame: every vertex
+shares the exact same integer XZ delta (the craft motion, e.g. dX=-63/-64),
+dZ~0, while only Y varies (-8..+15, the wave animation). Mathematically ideal
+for interpolation — so rt64 d50378a interpolates large meshes when a strict
+rigidity check passes (>=98% of verts within 1.0 of the median XZ delta),
+with CLEANED velocities (uniform median XZ + per-vertex Y morph; residuals
+zeroed against quantization shimmer); rotation frames and cross-paired wave
+passes (identical static matrices let similarity matching pair DIFFERENT
+meshes — the original "water warp") fail the check and snap.
+
+Telemetry confirms the mechanics (wave chunks 500/867/354 verts accept,
+non-rigid pairs reject) — but BY EYE the water motion still doesn't read
+right (user-tested twice; sensitivity to camera angle/attract and craft
+speed). Parked as EXPERIMENTAL: launcher Enhancements -> "Smooth Water
+(experimental)", default OFF (rt64_wr64_set_vertex_interp_rigid;
+WR64_VTXINTERP_RIGID=1 env override). Clouds/sprites stay always-smooth.
+Open theories for why it reads wrong: texcoords still snap at 20 Hz over
+smoothly-sliding geometry (mixed-rate shimmer); the height morph blending
+wave PHASE linearly; or the craft/spray interacting with water that now
+moves between physics frames.
+
+Also deferred: the top garbage strip (fb rows 0-19, TV-overscan scratch)
+exposed by widescreen — a top present-band crop worked but read as a
+mismatched black bar; the proper fix belongs to the planned FULL-WINDOW
+presentation (game content fills the entire window, overscan cropped as part
+of the scale-up). That is the next big presentation milestone.

@@ -41,6 +41,7 @@
 extern void wr64_set_show_borders(bool show);
 extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
 extern void wr64_set_fov_degrees(float deg);
+extern "C" void wr64_set_wave_interp(bool enabled);
 extern void wr64_set_texture_pack(const char* dir);
 extern void wr64_set_texture_replace(bool enabled);
 extern void wr64_set_texture_dump(bool enabled);
@@ -585,6 +586,12 @@ int main(int argc, char* argv[]) {
                 {3u, "widest",   "Widest (32x78)"},
                 {4u, "maximum",  "Maximum (40x96)"},
             }, 1u);
+        wr64_cfg.add_bool_option("wave_interp", "Smooth Water (experimental)",
+            "Interpolate the wave mesh at high framerates so the water slides "
+            "smoothly instead of stepping at the game's native 20 Hz. "
+            "Experimental: the wave motion can look off — turn it off if the "
+            "water seems wrong. Clouds and sprites are always smoothed.",
+            false);
         wr64_cfg.add_button_option("unlock_courses", "Unlock All Courses",
             "Mark every difficulty complete in the save file, unlocking all "
             "courses in Time Trials. Takes effect when the game (re)starts; "
@@ -629,6 +636,8 @@ int main(int argc, char* argv[]) {
             uint32_t idx = std::get<uint32_t>(cfg.get_option_value("wave_grid"));
             if (idx >= 5) idx = 1;
             wr64_set_wavegrid(rows[idx], cols[idx]);
+
+            wr64_set_wave_interp(std::get<bool>(cfg.get_option_value("wave_interp")));
         };
         wr64_cfg.set_load_callback(apply_wr64);
         wr64_cfg.set_save_callback(apply_wr64);

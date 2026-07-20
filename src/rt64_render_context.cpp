@@ -56,6 +56,13 @@ extern "C" void rt64_wr64_set_wide_world(int enabled);
 // play bands and set the persistent present blit bands (see
 // rt64_framebuffer_renderer.cpp / rt64_vi_renderer.cpp).
 extern "C" void rt64_wr64_set_vertex_interp(int enabled);
+extern "C" void rt64_wr64_set_vertex_interp_rigid(int enabled);
+
+// Launcher hook (Enhancements -> Smooth Water, experimental): rigid-translation
+// interpolation of the large wave meshes at high FPS.
+extern "C" void wr64_set_wave_interp(bool enabled) {
+    rt64_wr64_set_vertex_interp_rigid(enabled ? 1 : 0);
+}
 extern "C" uint32_t rt64_wr64_split_half_draws();
 extern "C" float rt64_wr64_split_band_a0();
 extern "C" float rt64_wr64_split_band_a1();
@@ -795,6 +802,13 @@ public:
             if (max_verts > 0) {
                 fprintf(stderr, "[WR64] vertex interpolation enabled (max %d verts per transform)\n", max_verts);
             }
+            // Experimental smooth-water (rigid large-mesh interpolation): env
+            // override; normally driven by the launcher Enhancements option.
+            const char* rigid_env = std::getenv("WR64_VTXINTERP_RIGID");
+            if (rigid_env && rigid_env[0] == '1') {
+                rt64_wr64_set_vertex_interp_rigid(1);
+                fprintf(stderr, "[WR64] experimental smooth-water interpolation enabled (env)\n");
+            }
         }
 
         printf("[WR64-RT64] Renderer context created (result=%d, api=%d)\n",
@@ -1010,6 +1024,14 @@ public:
                         rt64_wr64_set_split_bands(0.0f, 1.0f, 0.0f, 0.0f);
                     }
                 }
+                // NOTE (top garbage strip, deferred): framebuffer rows 0-19 sit
+                // above the game's content scissor and hold uncleared scratch a
+                // real TV's overscan hid; the widened presentation can expose it
+                // as a garbled strip. A top present-band crop fixed it but reads
+                // as a mismatched black bar — the real fix belongs to the
+                // planned FULL-WINDOW presentation (fill the entire window with
+                // game content, cropping the VI/overscan bands as part of the
+                // scale-up) rather than a standalone band.
 
                 // Widen inner-rect scissors at RT64 processing time too (all
                 // sub-DLs, segment-resolved) — the top-level word rewrite
