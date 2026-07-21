@@ -7,8 +7,10 @@
  * calls recomp::start() to launch the game.
  */
 
+#include <atomic>
 #include <cstdio>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <chrono>
@@ -53,6 +55,19 @@ static std::atomic<uint32_t> s_fps_pos{0};      // 0 TR, 1 TL, 2 BR, 3 BL
 static std::atomic<uint32_t> s_fps_color{0};    // index into wr64_fps_colors
 static std::atomic<uint32_t> s_fps_opacity{45}; // background opacity percent
 static std::atomic<uint32_t> s_fps_cfg_gen{1};
+
+// In-game toast staging (rendered top-center by update_gfx in its own
+// non-capturing context). Single message slot, callable from any thread.
+static std::mutex            s_toast_mutex;
+static std::string           s_toast_text;
+static std::atomic<uint32_t> s_toast_gen{0};
+static std::atomic<uint32_t> s_toast_expiry_ms{0};
+static void wr64_game_toast(const std::string& msg, uint32_t duration_ms = 2500) {
+    { std::lock_guard<std::mutex> lk(s_toast_mutex); s_toast_text = msg; }
+    s_toast_expiry_ms.store(SDL_GetTicks() + duration_ms);
+    s_toast_gen.fetch_add(1);
+}
+
 extern void wr64_mod_texture_pack_enabled(const std::string& mod_id);
 extern void wr64_mod_texture_pack_disabled(const std::string& mod_id);
 extern void wr64_mod_texture_packs_reordered();
@@ -294,11 +309,10 @@ static void update_gfx(void* /*gfx_data*/) {
         }
     }
 
-    // F5: toggle original <-> replaced textures (global — all loaded packs,
-    // Mods tab and Textures tab alike). Edge-detected from the SDL keyboard
-    // state so it works during gameplay AND with the menu open. Runtime-only;
-    // it never touches the persisted tex_enable / mod settings. (F4 does the
-    // same inside RT64 but only in developer mode.)
+    // F5: toggle original <-> replaced textures (global — all loaded packs).
+    // Edge-detected from the SDL keyboard state so it works during gameplay
+    // AND with the menu open. Runtime-only; it never touches the persisted
+    // mod settings. (F4 does the same inside RT64 but only in developer mode.)
     {
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         static bool f5_was_down = false;
@@ -306,12 +320,77 @@ static void update_gfx(void* /*gfx_data*/) {
         if (f5_down && !f5_was_down && wr64::rt64_texture_pack_loaded()) {
             bool now_on = wr64::rt64_toggle_replacements();
 #ifdef HAS_RECOMPUI
-            recompui::config::show_notification(recompui::config::NotificationType::Info,
-                now_on ? "HD textures: ON" : "HD textures: OFF (original)");
+            wr64_game_toast(now_on ? "HD Textures: On" : "HD Textures: Off (original)");
 #endif
         }
         f5_was_down = f5_down;
     }
+
+#ifdef HAS_RECOMPUI
+    // In-game toast: a top-center pill in its own NON-CAPTURING recompui
+    // context (a capturing shown context would disable all game input via
+    // recompinput — same rule as the FPS overlay). Single message slot;
+    // wr64_game_toast() stages it from any thread, this block (gfx thread)
+    // shows/expires it. Unlike recompui::config::show_notification, this
+    // renders during gameplay (that one lives in the settings-modal context).
+    {
+        static recompui::ContextId toast_ctx = {};
+        static bool toast_ctx_created = false;
+        static recompui::Label* toast_label = nullptr;
+        static bool toast_shown = false;
+        static uint32_t toast_applied_gen = 0;
+
+        const uint32_t gen = s_toast_gen.load();
+        const uint32_t now_ms = SDL_GetTicks();
+        const bool expired = (int32_t)(now_ms - s_toast_expiry_ms.load()) >= 0;
+
+        if (toast_shown && (expired || gen != toast_applied_gen)) {
+            recompui::hide_context(toast_ctx);
+            toast_shown = false;
+        }
+        if (gen != toast_applied_gen && !expired) {
+            toast_applied_gen = gen;
+            if (!toast_ctx_created) {
+                toast_ctx = recompui::create_context();
+                toast_ctx.set_captures_input(false);
+                toast_ctx.set_captures_mouse(false);
+                toast_ctx_created = true;
+
+                toast_ctx.open();
+                recompui::Element* pill = toast_ctx.create_element<recompui::Element>(
+                    toast_ctx.get_root_element());
+                pill->set_position(recompui::Position::Absolute);
+                pill->set_top(16.0f);
+                pill->set_left(50.0f, recompui::Unit::Percent);
+                pill->set_translate_2D(-50.0f, 0.0f, recompui::Unit::Percent);
+                pill->set_padding_top(4.0f);
+                pill->set_padding_bottom(4.0f);
+                pill->set_padding_left(14.0f);
+                pill->set_padding_right(14.0f);
+                pill->set_border_radius(12.0f);
+                pill->set_background_color(recompui::Color{ 0, 0, 0, 170 });
+                toast_label = toast_ctx.create_element<recompui::Label>(
+                    pill, "", recompui::LabelStyle::Small);
+                toast_label->set_color(recompui::Color{ 255, 255, 255, 255 });
+                toast_ctx.close();
+            }
+            toast_ctx.open();
+            {
+                int win_w = 0, win_h = 0;
+                if (window != nullptr) SDL_GetWindowSize(window, &win_w, &win_h);
+                float font_px = win_h * 0.024f;
+                if (font_px < 16.0f) font_px = 16.0f;
+                if (font_px > 32.0f) font_px = 32.0f;
+                toast_label->set_font_size(font_px, recompui::Unit::Px);
+                std::lock_guard<std::mutex> lk(s_toast_mutex);
+                toast_label->set_text(s_toast_text);
+            }
+            toast_ctx.close();
+            recompui::show_context(toast_ctx, "");
+            toast_shown = true;
+        }
+    }
+#endif
 
     // Title bar: friendly static info (target framerate + texture-pack state);
     // the measured FPS lives in the in-window overlay below. Refreshed on a 1s
@@ -602,7 +681,7 @@ int main(int argc, char* argv[]) {
     // 3. Build the Configuration and start
     // -----------------------------------------------------------------------
     recomp::Configuration config {
-        .project_version = recomp::Version(0, 1, 0, "-alpha"),
+        .project_version = recomp::Version(0, 2, 0, "-beta"),
 
         .window_handle = ultramodern::renderer::WindowHandle{},
 
