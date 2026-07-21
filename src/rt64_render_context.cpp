@@ -26,7 +26,10 @@
 #include <string>
 #include <algorithm>
 #include <atomic>
+#include <set>
 #include <vector>
+
+#include "librecomp/mods.hpp"
 
 #include <SDL2/SDL_events.h>
 
@@ -122,6 +125,7 @@ static std::string       s_tex_dump_dir = "textures_dump"; // hardcoded dump out
 static std::atomic<bool> s_tex_replace_enabled{true}; // enable replacements
 static std::atomic<bool> s_tex_dump_enabled{false};   // dump textures
 static std::atomic<bool> s_tex_dirty{false};          // runtime re-apply request
+static std::set<std::string> s_tex_mod_packs;         // enabled Mods-tab pack mod ids (s_tex_mutex)
 
 // Reconcile RT64's texture state with the launcher/env settings. MUST be called
 // on the gfx thread (loads packs / mutates textureCache + state, which the
@@ -132,40 +136,69 @@ static void apply_texture_state_gfx(RT64::Application* app) {
         return;
     }
     std::string want_pack, dump_dir;
+    std::vector<std::string> mod_pack_ids;
     {
         std::lock_guard<std::mutex> lk(s_tex_mutex);
         want_pack = s_tex_pack_dir;
         dump_dir = s_tex_dump_dir;
+        mod_pack_ids.assign(s_tex_mod_packs.begin(), s_tex_mod_packs.end());
     }
-    // (Re)load the pack when the folder changes.
-    static std::string applied_pack;  // gfx-thread-only
-    if (app->textureCache != nullptr && want_pack != applied_pack) {
-        applied_pack = want_pack;
+
+    // Compose the full replacement-directory list: Mods-tab packs (.rtz/folder
+    // mods with an rt64.json, ordered by the mod list — later vector entries
+    // override earlier ones in RT64, so sort descending by order index like
+    // Zelda64Recomp) plus the Textures-tab pack last (explicit path wins).
+    std::sort(mod_pack_ids.begin(), mod_pack_ids.end(),
+        [](const std::string& lhs, const std::string& rhs) {
+            return recomp::mods::get_mod_order_index(lhs) > recomp::mods::get_mod_order_index(rhs);
+        });
+
+    std::vector<std::string> want_paths;
+    for (const std::string& mod_id : mod_pack_ids) {
+        want_paths.push_back(recomp::mods::get_mod_filename(mod_id).string());
+    }
+    // "Enable Texture Pack" (tex_enable) only gates the Textures-tab pack —
+    // Mods-tab packs have their own per-mod toggles and stay unaffected.
+    if (!want_pack.empty() && s_tex_replace_enabled.load()) {
+        want_paths.push_back(want_pack);
+    }
+
+    // (Re)load when the effective pack list changes. loadReplacementDirectories
+    // REPLACES the whole set, so the list is always rebuilt from scratch.
+    static std::vector<std::string> applied_paths;  // gfx-thread-only
+    if (app->textureCache != nullptr && want_paths != applied_paths) {
+        applied_paths = want_paths;
         s_tex_pack_loaded.store(false);
-        if (!want_pack.empty()) {
+
+        std::vector<RT64::ReplacementDirectory> dirs;
+        for (const std::string& path : want_paths) {
             std::error_code ec;
-            // Accept either a folder or a .zip file — RT64's loader picks
+            // Accept either a folder or a file (.zip/.rtz) — RT64's loader picks
             // FileSystemZip for a regular file (miniz) and FileSystemDirectory
             // for a folder. Both need an rt64.json inside (or, for Rice packs,
             // the Rice database).
-            const bool is_dir = std::filesystem::is_directory(want_pack, ec);
-            const bool is_file = std::filesystem::is_regular_file(want_pack, ec);
-            if (is_dir || is_file) {
-                if (app->textureCache->loadReplacementDirectory(RT64::ReplacementDirectory(want_pack))) {
-                    s_tex_pack_loaded.store(true);
-                    fprintf(stderr, "[WR64-TEX] texture pack loaded (%s): %s\n",
-                            is_file ? "zip" : "folder", want_pack.c_str());
-                } else {
-                    fprintf(stderr, "[WR64-TEX] texture pack failed to load (no rt64.json?): %s\n", want_pack.c_str());
+            if (std::filesystem::is_directory(path, ec) || std::filesystem::is_regular_file(path, ec)) {
+                dirs.emplace_back(path);
+            } else {
+                fprintf(stderr, "[WR64-TEX] texture pack not found: %s\n", path.c_str());
+            }
+        }
+        if (!dirs.empty()) {
+            if (app->textureCache->loadReplacementDirectories(dirs)) {
+                s_tex_pack_loaded.store(true);
+                fprintf(stderr, "[WR64-TEX] %zu texture pack(s) loaded\n", dirs.size());
+                for (const std::string& path : want_paths) {
+                    fprintf(stderr, "[WR64-TEX]   %s\n", path.c_str());
                 }
             } else {
-                fprintf(stderr, "[WR64-TEX] texture pack not found: %s\n", want_pack.c_str());
+                fprintf(stderr, "[WR64-TEX] texture pack(s) failed to load (no rt64.json?)\n");
             }
+        } else {
+            app->textureCache->clearReplacementDirectories();
         }
     }
     if (app->textureCache != nullptr) {
-        app->textureCache->textureMap.replacementMapEnabled =
-            s_tex_replace_enabled.load() && s_tex_pack_loaded.load();
+        app->textureCache->textureMap.replacementMapEnabled = s_tex_pack_loaded.load();
     }
     // Dumping: hardcoded output dir (dump_dir; env WR64_TEXDUMP=<path> can override).
     if (app->state != nullptr) {
@@ -208,6 +241,21 @@ void wr64_set_texture_pack(const char* dir) {
 }
 void wr64_set_texture_replace(bool enabled) { s_tex_replace_enabled.store(enabled); s_tex_dirty.store(true); }
 void wr64_set_texture_dump(bool enabled)    { s_tex_dump_enabled.store(enabled);    s_tex_dirty.store(true); }
+
+// Mods-tab texture packs (.rtz containers / mod folders with an rt64.json).
+// Called from the mod framework's content-type callbacks (UI/mod thread);
+// stage + dirty like the setters above, gfx thread applies.
+void wr64_mod_texture_pack_enabled(const std::string& mod_id) {
+    { std::lock_guard<std::mutex> lk(s_tex_mutex); s_tex_mod_packs.insert(mod_id); }
+    s_tex_dirty.store(true);
+}
+void wr64_mod_texture_pack_disabled(const std::string& mod_id) {
+    { std::lock_guard<std::mutex> lk(s_tex_mutex); s_tex_mod_packs.erase(mod_id); }
+    s_tex_dirty.store(true);
+}
+void wr64_mod_texture_packs_reordered() {
+    s_tex_dirty.store(true);
+}
 
 // ---------------------------------------------------------------------------
 // GraphicsConfig → RT64 UserConfiguration helpers
@@ -269,6 +317,26 @@ static void apply_graphics_config_to_rt64(RT64::Application* app,
         case ultramodern::renderer::Resolution::Original4x:
             app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
             app->userConfig.resolutionMultiplier = 4.0f * std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+        case ultramodern::renderer::Resolution::Original5x:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = 5.0f * std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+        case ultramodern::renderer::Resolution::Original6x:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = 6.0f * std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+        case ultramodern::renderer::Resolution::Original8x:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = 8.0f * std::max(cfg.ds_option, 1);
+            app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
+            break;
+        case ultramodern::renderer::Resolution::Original9x:
+            app->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+            app->userConfig.resolutionMultiplier = 9.0f * std::max(cfg.ds_option, 1);
             app->userConfig.downsampleMultiplier = std::max(cfg.ds_option, 1);
             break;
     }
@@ -1612,6 +1680,19 @@ bool rt64_replacements_enabled() {
     RT64::Application* app = s_app.load();
     return app != nullptr && app->textureCache != nullptr &&
            app->textureCache->textureMap.replacementMapEnabled;
+}
+
+// Hotkey toggle (original <-> replaced textures). Works regardless of RT64
+// developer mode, but only when at least one pack is actually loaded. Called
+// from update_gfx on the gfx thread.
+bool rt64_toggle_replacements() {
+    RT64::Application* app = s_app.load();
+    if (app == nullptr || app->textureCache == nullptr || !s_tex_pack_loaded.load()) {
+        return false;
+    }
+    bool& flag = app->textureCache->textureMap.replacementMapEnabled;
+    flag = !flag;
+    return flag;
 }
 
 } // namespace wr64

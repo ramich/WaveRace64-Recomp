@@ -4,10 +4,27 @@ Wave Race 64 Recomp uses RT64's built-in texture-replacement system. You can
 replace any of the game's textures (HUD, water, etc.) with higher-resolution
 images of your own — no engine changes needed.
 
-## Enabling a pack
+**F5** toggles all loaded replacements on/off live, in-game or in menus
+(no developer mode needed; the title bar reflects the state).
 
-Point the game at a pack directory and it loads at launch (and is enabled — you
-can toggle it live with **F4**):
+## Installing a pack as a mod (recommended: `.rtz`)
+
+Zip the pack's *contents* (so `rt64.json` sits at the zip root), rename the
+file to `.rtz`, and drop it into the game's `mods/` folder. It appears in the
+launcher **Mods tab** with a per-pack enable toggle. Optional metadata at the
+zip root:
+
+- `mod.json` — name/author/version (`game_id` must be `"waverace64"`; required
+  fields: `id`, `display_name`, `version`, `authors`, `minimum_recomp_version`)
+- `thumb.png` — icon shown in the Mods list
+
+Multiple enabled packs merge; the pack higher in the mod list wins for
+textures both packs replace (drag to reorder).
+
+## Enabling a pack by path (Textures tab / env)
+
+Point the game at a pack directory and it loads at launch (its tab toggle only
+affects this pack — mod packs keep their own toggles):
 
 ```powershell
 $env:WR64_TEXPACK = "textures"   # this folder; or an absolute path

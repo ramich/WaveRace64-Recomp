@@ -68,22 +68,29 @@ process left behind.
 - **Symbol map:** JAL-scan derived; indirect-call targets are still being discovered
   during play-testing (automated fix loop: `scripts/bringup_loop.ps1`)
 - **Settings UI**: the RecompFrontend launcher (graphics, audio, controls) is
-  integrated. Display settings (resolution up to 4x, MSAA, framerate, fullscreen)
-  apply live; **controls are fully rebindable** (the port routes input through
-  recompinput, so the Controls tab actually takes effect). A game-specific
-  **Enhancements** tab exposes the **Overscan Crop** (full-window presentation,
-  default on), camera FOV with a real
-  **Reset to 45°** action button, wave-grid size, and an **Unlock** button
+  integrated. Display settings apply live — resolution now renders as a
+  **dropdown** (new dropdown-enum config-option type in our librecomp +
+  RecompFrontend forks) with Original 1×–9× choices (240p → 2160p/4K) plus
+  Auto; MSAA, framerate and fullscreen as before; **controls are fully
+  rebindable** (the port routes input through recompinput, so the Controls tab
+  actually takes effect). A game-specific **Enhancements** tab exposes the
+  **Overscan Crop** (full-window presentation, default on), camera FOV with a
+  real **Reset to 45°** action button, wave-grid size, an **Unlock** button
   (marks every difficulty complete in the EEPROM save — keeps a
-  `.unlock_backup` — applied on next game start). A **Textures** tab enables
-  RT64 HD texture-replacement packs (enable toggle synced with the F4 hotkey,
-  pack path with native **Browse Folder…/Browse .zip…** pickers, and a
-  texture-dump toggle for pack authoring — see `textures/README.md`). The
-  action buttons use a new stateless **Button config-option type** added to our
-  librecomp + RecompFrontend forks (upstream had no per-option buttons — only
-  page chrome — hence the old check-a-box-then-Apply hacks; the button label
-  no-wrap fix also resolves upstream RecompFrontend issue #26). The Mods tab
-  and launcher entry are removed (Wave Race 64 has no mods). Environment
+  `.unlock_backup` — applied on next game start), and a configurable **FPS
+  overlay** (on/off, position, color, background opacity — the extra options
+  hide while the display is off). A **Textures** tab loads a single RT64 HD
+  texture-replacement pack by path (native **Browse Folder…/Browse .zip…**
+  pickers, texture-dump toggle for pack authoring — see `textures/README.md`);
+  its enable toggle affects only that pack. **Texture packs are also proper
+  mods**: drop an `.rtz` (a pack zip with `rt64.json`, optional `mod.json` +
+  `thumb.png` for name/author/icon) into `mods/` and it appears in the **Mods
+  tab** with a per-pack toggle; multiple enabled packs merge with mod-list
+  order deciding per-texture priority. **F5** toggles all replacements
+  on/off live, any time a pack is loaded. The action buttons use a new
+  stateless **Button config-option type** added to our librecomp +
+  RecompFrontend forks (the button label no-wrap fix also resolves upstream
+  RecompFrontend issue #26). Environment
   variables below remain as overrides/fallbacks and for dev tooling. **Border
   removal is boot-time** — toggling it in the launcher takes effect after a
   restart (the renderer's aspect ratio is fixed at launch; see below)
@@ -127,12 +134,13 @@ process left behind.
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
-| `WR64_TEXPACK=<path>` | Load an RT64 HD texture-replacement pack from `<path>` — a **folder or a `.zip`** (both need `rt64.json` + hash-named images inside) — and enable it; toggle live with **F4**. `WR64_TEXPACK=1` = `./textures`. See `textures/README.md` |
+| `WR64_TEXPACK=<path>` | Load an RT64 HD texture-replacement pack from `<path>` — a **folder or a `.zip`** (both need `rt64.json` + hash-named images inside) — and enable it; toggle live with **F5**. `WR64_TEXPACK=1` = `./textures`. Texture packs can also be installed as **`.rtz` mods** in `mods/` (Mods tab, per-pack toggles). See `textures/README.md` |
 | `WR64_TEXDUMP=<dir>` | Dump every texture RT64 loads (hash-named, Rice/TMEM format) into `<dir>` — raw material for building a pack. `WR64_TEXDUMP=1` = `./textures_dump`. See `textures/README.md` |
 
 Keyboard (defaults): WASD = stick, X = A, Z = B, LShift = Z, Return = START,
 arrows = D-pad, Q/E = L/R, IJKL = C-buttons, Esc = open settings menu (during
-gameplay; the settings menu has a quit option), F11 / Alt+Enter = fullscreen.
+gameplay; the settings menu has a quit option), F11 / Alt+Enter = fullscreen,
+F5 = toggle HD texture replacements (when a pack is loaded).
 **All bindings are remappable** in the launcher's Controls tab. Game controllers
 map automatically; the window title shows the measured FPS and the selected
 target framerate.
@@ -157,7 +165,7 @@ WR64_DEV=1 ./build/WaveRace64Recomp
 | **F1** | RT64 Inspector (ImGui): render statistics/profiling, framebuffer views, user & enhancement configuration editors (resolution, aspect, MSAA, filtering -- applied live) |
 | **F2** | Toggle ray tracing — **non-functional in current RT64**: the shortcut flips the flag, but every consumer sits behind `#if RT_ENABLED`, which no build defines, and the RT shader pipeline was never ported into the modern RT64 rewrite (it's a leftover from the original SM64RT-era path tracer). No GPU will show a difference |
 | **F3** | Toggle raw-RDRAM framebuffer view (shows the game's original 320x240 output; brief artifacts when toggling back are a known RT64 quirk) |
-| **F4** | Toggle texture replacements on/off (no effect unless a pack is loaded via `WR64_TEXPACK` — see `textures/README.md`) |
+| **F4** | Toggle texture replacements on/off (RT64's own shortcut, dev-mode only; **F5 does the same without dev mode** — see `textures/README.md`) |
 
 Without `WR64_DEV=1` these keys are deliberately inert (RT64 itself only guards F1;
 we gate the rest to keep players out of debug views).
@@ -389,7 +397,7 @@ WaveRace64-Recomp/
 - [x] Widescreen (3D expand; per-scene presentation keeps 2D menus at 4:3)
 - [x] High-FPS presentation (`WR64_HIGHFPS=1`, interpolated; cloud stutter fixed via `WR64_VTXINTERP`)
 - [ ] Border removal endgame (culling frustum + wave-grid, see `docs/RE-NOTES.md`)
-- [ ] HD texture support
+- [x] HD texture support (`.rtz` texture-pack mods in the Mods tab, Textures tab path/zip, F5 live toggle)
 - [ ] Release packaging
 
 ## Tools

@@ -18,6 +18,7 @@
 #include <system_error>
 
 #include "librecomp/game.hpp"
+#include "librecomp/mods.hpp"
 #include "librecomp/overlays.hpp"
 #include "librecomp/sections.h"
 #include "librecomp/addresses.hpp"
@@ -49,12 +50,16 @@ extern "C" void wr64_set_overscan_crop(bool enabled);
 // FPS overlay configuration (set from the launcher Enhancements tab on the UI
 // thread, consumed by the overlay in update_gfx on the gfx thread).
 static std::atomic<bool>     s_fps_show{true};
-static std::atomic<uint32_t> s_fps_pos{0};    // 0 TR, 1 TL, 2 BR, 3 BL
-static std::atomic<uint32_t> s_fps_color{0};  // index into wr64_fps_colors
+static std::atomic<uint32_t> s_fps_pos{0};      // 0 TR, 1 TL, 2 BR, 3 BL
+static std::atomic<uint32_t> s_fps_color{0};    // index into wr64_fps_colors
+static std::atomic<uint32_t> s_fps_opacity{45}; // background opacity percent
 static std::atomic<uint32_t> s_fps_cfg_gen{1};
 extern void wr64_set_texture_pack(const char* dir);
 extern void wr64_set_texture_replace(bool enabled);
 extern void wr64_set_texture_dump(bool enabled);
+extern void wr64_mod_texture_pack_enabled(const std::string& mod_id);
+extern void wr64_mod_texture_pack_disabled(const std::string& mod_id);
+extern void wr64_mod_texture_packs_reordered();
 #endif
 
 // Pull in the recompiled function declarations and overlay tables.
@@ -293,25 +298,24 @@ static void update_gfx(void* /*gfx_data*/) {
         }
     }
 
+    // F5: toggle original <-> replaced textures (global — all loaded packs,
+    // Mods tab and Textures tab alike). Edge-detected from the SDL keyboard
+    // state so it works during gameplay AND with the menu open. Runtime-only;
+    // it never touches the persisted tex_enable / mod settings. (F4 does the
+    // same inside RT64 but only in developer mode.)
+    {
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        static bool f5_was_down = false;
+        const bool f5_down = keys[SDL_SCANCODE_F5] != 0;
+        if (f5_down && !f5_was_down && wr64::rt64_texture_pack_loaded()) {
+            bool now_on = wr64::rt64_toggle_replacements();
 #ifdef HAS_RECOMPUI
-    // Keep the Textures "Enable Texture Pack" checkbox in sync with F4, which
-    // toggles RT64's replacement flag directly — including while the settings
-    // menu is open. update_option_value re-renders the checkbox; apply_option_value
-    // commits it so it doesn't read as an unapplied change. Only fires on an
-    // actual change. (Runs on the gfx thread, same as recompui's own updates.)
-    if (wr64::rt64_texture_pack_loaded()) {
-        static int last_synced = -1;
-        int live = wr64::rt64_replacements_enabled() ? 1 : 0;
-        if (live != last_synced) {
-            last_synced = live;
-            recomp::config::Config& cfg = recompui::config::get_config("wr64_textures");
-            if (std::get<bool>(cfg.get_option_value("tex_enable")) != (bool)live) {
-                cfg.update_option_value("tex_enable", (bool)live);
-                cfg.apply_option_value("tex_enable");
-            }
-        }
-    }
+            recompui::config::show_notification(recompui::config::NotificationType::Info,
+                now_on ? "HD textures: ON" : "HD textures: OFF (original)");
 #endif
+        }
+        f5_was_down = f5_down;
+    }
 
     // Title bar: friendly static info (target framerate + texture-pack state);
     // the measured FPS lives in the in-window overlay below. Refreshed on a 1s
@@ -342,7 +346,7 @@ static void update_gfx(void* /*gfx_data*/) {
         char title[160];
         SDL_snprintf(title, sizeof(title),
                      "Wave Race 64 - Recompiled   \xE2\x80\xA2   Target: %u FPS   "
-                     "\xE2\x80\xA2   Game: %.0f FPS%s",
+                     "\xE2\x80\xA2   Native: %.0f FPS%s",
                      target, last_fps, texs);
         SDL_SetWindowTitle(window, title);
     }
@@ -400,7 +404,9 @@ static void update_gfx(void* /*gfx_data*/) {
                 fps_pill->set_padding_left(10.0f);
                 fps_pill->set_padding_right(10.0f);
                 fps_pill->set_border_radius(10.0f);
-                fps_pill->set_background_color(recompui::Color{ 0, 0, 0, 110 });
+                uint32_t op = s_fps_opacity.load();
+                if (op > 100) op = 100;
+                fps_pill->set_background_color(recompui::Color{ 0, 0, 0, uint8_t(op * 255 / 100) });
                 fps_label = fps_ctx.create_element<recompui::Label>(
                     fps_pill, "", recompui::LabelStyle::Small);
                 static constexpr recompui::Color fps_colors[] = {
@@ -425,7 +431,7 @@ static void update_gfx(void* /*gfx_data*/) {
             fps_label->set_font_size(font_px, recompui::Unit::Px);
 
             char fps_text[48];
-            SDL_snprintf(fps_text, sizeof(fps_text), "%.0f FPS (game %.0f)",
+            SDL_snprintf(fps_text, sizeof(fps_text), "%.0f FPS (native %.0f)",
                          last_present_fps, last_fps);
             fps_label->set_text(fps_text);
             fps_ctx.close();
@@ -726,6 +732,14 @@ int main(int argc, char* argv[]) {
                 {4u, "orange", "Orange"},
                 {5u, "red",    "Red"},
             }, 0u);
+        wr64_cfg.add_percent_number_option("fps_opacity", "FPS Background Opacity",
+            "Opacity of the dark pill behind the FPS readout. 0% removes the "
+            "background entirely.",
+            45.0);
+        // The FPS styling options only matter while the readout is enabled.
+        wr64_cfg.add_option_hidden_dependency("fps_position", "fps_display", false);
+        wr64_cfg.add_option_hidden_dependency("fps_color", "fps_display", false);
+        wr64_cfg.add_option_hidden_dependency("fps_opacity", "fps_display", false);
         wr64_cfg.add_bool_option("wave_interp", "Smooth Water (experimental)",
             "Interpolate the wave mesh at high framerates so the water slides "
             "smoothly instead of stepping at the game's native 20 Hz. "
@@ -783,6 +797,7 @@ int main(int argc, char* argv[]) {
             s_fps_show.store(std::get<bool>(cfg.get_option_value("fps_display")));
             s_fps_pos.store(std::get<uint32_t>(cfg.get_option_value("fps_position")));
             s_fps_color.store(std::get<uint32_t>(cfg.get_option_value("fps_color")));
+            s_fps_opacity.store(uint32_t(std::get<double>(cfg.get_option_value("fps_opacity"))));
             s_fps_cfg_gen.fetch_add(1);
         };
         wr64_cfg.set_load_callback(apply_wr64);
@@ -792,8 +807,9 @@ int main(int argc, char* argv[]) {
     {
         recomp::config::Config& tex_cfg = recompui::config::create_config_tab("Textures", "wr64_textures", true);
         tex_cfg.add_bool_option("tex_enable", "Enable Texture Pack",
-            "Load HD replacement textures from the folder below. Applies live; "
-            "you can also toggle replacements in-game with F4.",
+            "Load HD replacement textures from the folder below. Only affects "
+            "this pack — texture-pack mods in the Mods tab have their own "
+            "toggles. Applies live; F5 toggles all replacements in-game.",
             true);
         tex_cfg.add_string_option("tex_pack_dir", "Texture Pack Folder or .zip",
             "Path to a texture pack — either a folder or a .zip file (both need an "
@@ -852,12 +868,38 @@ int main(int argc, char* argv[]) {
         tex_cfg.set_save_callback(apply_tex);
     }
 
+    // Mods tab: texture packs (.rtz containers, Zelda64Recomp-style). The
+    // content type below keys on rt64.json, so any pack dropped into mods/
+    // shows up here with a per-pack toggle.
+    recompui::config::create_mods_tab();
+
     recompui::config::finalize();
 
     // Wave Race 64 is single-player: use the SP keyboard + controller profiles
     // directly so input works without going through the player-assignment modal.
     // get_n64_input() (see src/input.cpp) reads these profiles.
     recompinput::players::set_single_player_mode(true);
+
+    // Texture-pack mod support (Zelda64Recomp pattern): a mod containing an
+    // rt64.json is a texture pack; the .rtz container extension wraps a pack
+    // zip with no manifest required (one is auto-created from the filename).
+    // Enabled packs are staged via wr64_mod_texture_pack_* and applied on the
+    // gfx thread together with the Textures-tab pack.
+    recomp::mods::ModContentType texture_pack_content_type{
+        .content_filename = "rt64.json",
+        .allow_runtime_toggle = true,
+        .on_enabled = [](recomp::mods::ModContext&, const recomp::mods::ModHandle& mod) {
+            wr64_mod_texture_pack_enabled(mod.manifest.mod_id);
+        },
+        .on_disabled = [](recomp::mods::ModContext&, const recomp::mods::ModHandle& mod) {
+            wr64_mod_texture_pack_disabled(mod.manifest.mod_id);
+        },
+        .on_reordered = [](recomp::mods::ModContext&) {
+            wr64_mod_texture_packs_reordered();
+        },
+    };
+    auto texture_pack_content_type_id = recomp::mods::register_mod_content_type(texture_pack_content_type);
+    recomp::mods::register_mod_container_type("rtz", std::vector{ texture_pack_content_type_id }, false);
 
     // Pause-for-menu disabled pending fix (menu input freezes when paused).
     // recompui::config::set_menu_close_callback([]() {
@@ -895,12 +937,12 @@ int main(int argc, char* argv[]) {
         // the layout's -50% X centering and shove the list to the right).
         options->set_bottom(30.0f, Unit::Percent);
 
-        // Add options individually (instead of add_default_options()) to omit
-        // the Mods entry — Wave Race 64 has no mod support — and brighten the
-        // resting text so it reads clearly over the background art (the default
-        // is theme TextDim, which was hard to see).
+        // Add options individually (instead of add_default_options()) to
+        // brighten the resting text so it reads clearly over the background
+        // art (the default is theme TextDim, which was hard to see).
         GameOption* opts[] = {
             options->add_start_game_or_load_rom_option(),
+            options->add_mods_option(),
             options->add_setup_controls_option(),
             options->add_settings_option(),
             options->add_exit_option(),

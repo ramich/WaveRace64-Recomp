@@ -5,6 +5,8 @@ param(
     [string]$OutDir = "$PSScriptRoot\..\drive_settings",
     [string]$Exe = "$PSScriptRoot\..\build\WaveRace64Recomp.exe",
     [int]$RightTaps = 5,
+    [int]$LeftTaps = 0,
+    [int]$DownTapsInTab = 0,
     [string]$Window = '1920x800'
 )
 $ErrorActionPreference = 'Stop'
@@ -51,9 +53,11 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $proc = Start-Process -FilePath $Exe -WorkingDirectory $repoRoot -RedirectStandardError (Join-Path $OutDir 'stderr.log') -RedirectStandardOutput (Join-Path $OutDir 'stdout.log') -PassThru
 Start-Sleep -Seconds 14
 $proc.Refresh(); $hwnd = $proc.MainWindowHandle
-[KeySend3]::SetCursorPos(0, 0) | Out-Null
+# NOTE: no SetCursorPos — never move the user's mouse (their request). Risk: if
+# the real cursor happens to hover the launcher menu it can steal the keyboard
+# highlight; keep the cursor away manually when running this.
 
-$VK_ENTER = 0x0D; $VK_DOWN = 0x28; $VK_RIGHT = 0x27
+$VK_ENTER = 0x0D; $VK_DOWN = 0x28; $VK_RIGHT = 0x27; $VK_LEFT = 0x25
 # Launcher: Down x2 to Settings, Enter.
 [KeySend3]::Tap($hwnd, [byte]$VK_DOWN, 150); Start-Sleep -Milliseconds 400
 [KeySend3]::Tap($hwnd, [byte]$VK_DOWN, 150); Start-Sleep -Milliseconds 400
@@ -64,11 +68,19 @@ for ($i = 1; $i -le $RightTaps; $i++) {
     [KeySend3]::Tap($hwnd, [byte]$VK_RIGHT, 150); Start-Sleep -Milliseconds 700
     Save-Shot $hwnd (Join-Path $OutDir ("{0:D2}_right.png" -f $i))
 }
+for ($i = 1; $i -le $LeftTaps; $i++) {
+    [KeySend3]::Tap($hwnd, [byte]$VK_LEFT, 150); Start-Sleep -Milliseconds 700
+    Save-Shot $hwnd (Join-Path $OutDir ("{0:D2}_left.png" -f $i))
+}
 
 # Activate the highlighted tab, screenshot its contents (Enhancements at 4
 # rights), then move once more and activate (Textures at 5).
 [KeySend3]::Tap($hwnd, [byte]$VK_ENTER, 200); Start-Sleep -Milliseconds 900
 Save-Shot $hwnd (Join-Path $OutDir '10_tab_a.png')
+for ($i = 1; $i -le $DownTapsInTab; $i++) {
+    [KeySend3]::Tap($hwnd, [byte]$VK_DOWN, 150); Start-Sleep -Milliseconds 500
+    Save-Shot $hwnd (Join-Path $OutDir ("2{0}_down.png" -f $i))
+}
 [KeySend3]::Tap($hwnd, [byte]$VK_RIGHT, 150); Start-Sleep -Milliseconds 500
 [KeySend3]::Tap($hwnd, [byte]$VK_ENTER, 200); Start-Sleep -Milliseconds 900
 Save-Shot $hwnd (Join-Path $OutDir '11_tab_b.png')

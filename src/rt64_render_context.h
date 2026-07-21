@@ -50,6 +50,9 @@ uint32_t rt64_consume_present_count();
 bool rt64_texture_pack_loaded();
 // Current state of RT64's texture-replacement toggle (F4).
 bool rt64_replacements_enabled();
+// Flip original <-> replaced textures (the F5 hotkey; F4 = RT64 dev-mode only).
+// No-op unless a pack is loaded. Returns the new state.
+bool rt64_toggle_replacements();
 
 } // namespace wr64
 
