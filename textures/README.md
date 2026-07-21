@@ -21,10 +21,10 @@ zip root:
 Multiple enabled packs merge; the pack higher in the mod list wins for
 textures both packs replace (drag to reorder).
 
-## Enabling a pack by path (Textures tab / env)
+## Enabling a pack by path (env override)
 
-Point the game at a pack directory and it loads at launch (its tab toggle only
-affects this pack — mod packs keep their own toggles):
+Point the game at a pack directory and it loads at launch, composed with any
+enabled pack mods:
 
 ```powershell
 $env:WR64_TEXPACK = "textures"   # this folder; or an absolute path
@@ -69,7 +69,7 @@ one from your dump (RT64 walks subfolders automatically):
 ```
 # 1. Dump the screens/courses the pack covers (WR64_TEXDUMP=1), then:
 python scripts/decode_texture_dump.py textures_dump --rice "<pack root folder>"
-# 2. Point the Textures tab / WR64_TEXPACK at that pack root folder.
+# 2. Point WR64_TEXPACK at that pack root folder (or zip it up as an .rtz mod).
 ```
 
 This writes only `rt64.json` (a hash index) into the pack folder; the pack images

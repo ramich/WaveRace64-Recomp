@@ -79,14 +79,13 @@ process left behind.
   (marks every difficulty complete in the EEPROM save — keeps a
   `.unlock_backup` — applied on next game start), and a configurable **FPS
   overlay** (on/off, position, color, background opacity — the extra options
-  hide while the display is off). A **Textures** tab loads a single RT64 HD
-  texture-replacement pack by path (native **Browse Folder…/Browse .zip…**
-  pickers, texture-dump toggle for pack authoring — see `textures/README.md`);
-  its enable toggle affects only that pack. **Texture packs are also proper
-  mods**: drop an `.rtz` (a pack zip with `rt64.json`, optional `mod.json` +
-  `thumb.png` for name/author/icon) into `mods/` and it appears in the **Mods
-  tab** with a per-pack toggle; multiple enabled packs merge with mod-list
-  order deciding per-texture priority. **F5** toggles all replacements
+  hide while the display is off). **HD texture packs are mods**: drop an
+  `.rtz` (a pack zip with `rt64.json`, optional `mod.json` + `thumb.png` for
+  name/author/icon) into `mods/` and it appears in the **Mods tab** with a
+  per-pack toggle; multiple enabled packs merge with mod-list order deciding
+  per-texture priority (see `textures/README.md`; `WR64_TEXPACK` remains as a
+  path/zip env override, `WR64_TEXDUMP` dumps textures for pack authoring).
+  **F5** toggles all replacements
   on/off live, any time a pack is loaded. The action buttons use a new
   stateless **Button config-option type** added to our librecomp +
   RecompFrontend forks (the button label no-wrap fix also resolves upstream

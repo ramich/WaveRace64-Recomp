@@ -115,14 +115,14 @@ static void dummy_check_interrupts() {}
 static std::atomic<RT64::Application*> s_app{nullptr};
 static std::atomic<bool> s_tex_pack_loaded{false};
 
-// Texture-replacement state, driven by the launcher "Textures" tab (setters
-// below) and WR64_TEXPACK/WR64_TEXDUMP env overrides. UI-thread setters only
-// touch these + raise s_tex_dirty; the actual RT64 mutation happens on the gfx
-// thread in apply_texture_state_gfx() (called from update_screen).
+// Texture-replacement state. Packs come from the Mods tab (.rtz mods, staged by
+// wr64_mod_texture_pack_* below) plus the optional WR64_TEXPACK env path;
+// WR64_TEXDUMP drives dumping. Staging threads only touch these + raise
+// s_tex_dirty; the actual RT64 mutation happens on the gfx thread in
+// apply_texture_state_gfx() (called from update_screen).
 static std::mutex        s_tex_mutex;                 // guards the string members
 static std::string       s_tex_pack_dir;              // pack folder ("" = none)
 static std::string       s_tex_dump_dir = "textures_dump"; // hardcoded dump output
-static std::atomic<bool> s_tex_replace_enabled{true}; // enable replacements
 static std::atomic<bool> s_tex_dump_enabled{false};   // dump textures
 static std::atomic<bool> s_tex_dirty{false};          // runtime re-apply request
 static std::set<std::string> s_tex_mod_packs;         // enabled Mods-tab pack mod ids (s_tex_mutex)
@@ -147,7 +147,7 @@ static void apply_texture_state_gfx(RT64::Application* app) {
     // Compose the full replacement-directory list: Mods-tab packs (.rtz/folder
     // mods with an rt64.json, ordered by the mod list — later vector entries
     // override earlier ones in RT64, so sort descending by order index like
-    // Zelda64Recomp) plus the Textures-tab pack last (explicit path wins).
+    // Zelda64Recomp) plus the WR64_TEXPACK env pack last (explicit path wins).
     std::sort(mod_pack_ids.begin(), mod_pack_ids.end(),
         [](const std::string& lhs, const std::string& rhs) {
             return recomp::mods::get_mod_order_index(lhs) > recomp::mods::get_mod_order_index(rhs);
@@ -157,9 +157,7 @@ static void apply_texture_state_gfx(RT64::Application* app) {
     for (const std::string& mod_id : mod_pack_ids) {
         want_paths.push_back(recomp::mods::get_mod_filename(mod_id).string());
     }
-    // "Enable Texture Pack" (tex_enable) only gates the Textures-tab pack —
-    // Mods-tab packs have their own per-mod toggles and stay unaffected.
-    if (!want_pack.empty() && s_tex_replace_enabled.load()) {
+    if (!want_pack.empty()) {
         want_paths.push_back(want_pack);
     }
 
@@ -232,15 +230,6 @@ static int s_crop_requested = -1;
 void wr64_set_show_borders(bool show)                        { s_show_borders  = show; }
 void wr64_set_wavegrid(uint32_t rows, uint32_t cols)         { s_wavegrid_rows = rows; s_wavegrid_cols = cols; }
 void wr64_set_fov_degrees(float deg)                         { s_fov_degrees   = deg;  }
-
-// Launcher "Textures" tab setters (UI thread). They only stage state + raise the
-// dirty flag; apply_texture_state_gfx() applies it on the gfx thread.
-void wr64_set_texture_pack(const char* dir) {
-    { std::lock_guard<std::mutex> lk(s_tex_mutex); s_tex_pack_dir = (dir ? dir : ""); }
-    s_tex_dirty.store(true);
-}
-void wr64_set_texture_replace(bool enabled) { s_tex_replace_enabled.store(enabled); s_tex_dirty.store(true); }
-void wr64_set_texture_dump(bool enabled)    { s_tex_dump_enabled.store(enabled);    s_tex_dirty.store(true); }
 
 // Mods-tab texture packs (.rtz containers / mod folders with an rt64.json).
 // Called from the mod framework's content-type callbacks (UI/mod thread);
@@ -834,18 +823,16 @@ public:
         }
 
         // ---- HD texture packs (replacement) + texture dumping ----
-        // RT64's texture-replacement system is driven by the launcher "Textures"
-        // tab (wr64_set_texture_* below) and, as startup overrides, the env vars
-        // WR64_TEXPACK / WR64_TEXDUMP. Env vars win at launch; runtime launcher
-        // changes are reconciled on the gfx thread (apply_texture_state_gfx,
-        // called from update_screen). The actual RT64 mutation always happens on
-        // the gfx thread to stay safe against send_dl/update_screen.
+        // RT64's texture-replacement system is driven by the launcher
+        // Mods tab (.rtz texture packs) and the env vars WR64_TEXPACK /
+        // WR64_TEXDUMP. All changes are reconciled on the gfx thread
+        // (apply_texture_state_gfx, called from update_screen) to stay safe
+        // against send_dl/update_screen.
         {
             const char* pack = std::getenv("WR64_TEXPACK");
             if (pack && pack[0] != '\0' && std::strcmp(pack, "0") != 0) {
                 std::lock_guard<std::mutex> lk(s_tex_mutex);
                 s_tex_pack_dir = (std::strcmp(pack, "1") == 0) ? "textures" : pack;
-                s_tex_replace_enabled.store(true);
             }
             const char* dump = std::getenv("WR64_TEXDUMP");
             if (dump && dump[0] != '\0' && std::strcmp(dump, "0") != 0) {

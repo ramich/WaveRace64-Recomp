@@ -35,7 +35,6 @@
 #include "recompui/config.h"
 #include "recompinput/input_events.h"
 #include "recompinput/players.h"
-#include "util/file.h"   // recompui folder/file pickers (NFD-backed)
 #include "core/ui_context.h"     // create_context (FPS overlay)
 #include "elements/ui_label.h"
 #include "nfd.h"
@@ -54,9 +53,6 @@ static std::atomic<uint32_t> s_fps_pos{0};      // 0 TR, 1 TL, 2 BR, 3 BL
 static std::atomic<uint32_t> s_fps_color{0};    // index into wr64_fps_colors
 static std::atomic<uint32_t> s_fps_opacity{45}; // background opacity percent
 static std::atomic<uint32_t> s_fps_cfg_gen{1};
-extern void wr64_set_texture_pack(const char* dir);
-extern void wr64_set_texture_replace(bool enabled);
-extern void wr64_set_texture_dump(bool enabled);
 extern void wr64_mod_texture_pack_enabled(const std::string& mod_id);
 extern void wr64_mod_texture_pack_disabled(const std::string& mod_id);
 extern void wr64_mod_texture_packs_reordered();
@@ -803,74 +799,11 @@ int main(int argc, char* argv[]) {
         wr64_cfg.set_load_callback(apply_wr64);
         wr64_cfg.set_save_callback(apply_wr64);
     }
-    // Textures tab: HD texture-replacement packs.
-    {
-        recomp::config::Config& tex_cfg = recompui::config::create_config_tab("Textures", "wr64_textures", true);
-        tex_cfg.add_bool_option("tex_enable", "Enable Texture Pack",
-            "Load HD replacement textures from the folder below. Only affects "
-            "this pack — texture-pack mods in the Mods tab have their own "
-            "toggles. Applies live; F5 toggles all replacements in-game.",
-            true);
-        tex_cfg.add_string_option("tex_pack_dir", "Texture Pack Folder or .zip",
-            "Path to a texture pack — either a folder or a .zip file (both need an "
-            "rt64.json inside, or the Rice database). Relative paths are resolved "
-            "from the game's folder. Overridden at launch by the WR64_TEXPACK "
-            "environment variable.",
-            "textures");
-        tex_cfg.add_button_option("tex_browse_folder", "Browse for Pack Folder",
-            "Pick the texture-pack folder with a file browser. Fills in the path "
-            "above; press Apply to load it.",
-            "Browse Folder…");
-        tex_cfg.add_button_option("tex_browse_zip", "Browse for Pack .zip",
-            "Pick a texture-pack .zip file with a file browser. Fills in the path "
-            "above; press Apply to load it.",
-            "Browse .zip…");
-        tex_cfg.add_option_change_callback("tex_browse_folder",
-            [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant,
-               recomp::config::OptionChangeContext ctx) {
-                if (ctx == recomp::config::OptionChangeContext::Load) return;
-                recompui::file::open_folder_dialog([](bool success, const std::filesystem::path& path) {
-                    if (success) {
-                        recompui::config::get_config("wr64_textures").update_option_value(
-                            "tex_pack_dir", path.string());
-                        recompui::config::show_notification(recompui::config::NotificationType::Info,
-                            "Pack folder selected — press Apply to load it.");
-                    }
-                });
-            });
-        tex_cfg.add_option_change_callback("tex_browse_zip",
-            [](recomp::config::ConfigValueVariant, recomp::config::ConfigValueVariant,
-               recomp::config::OptionChangeContext ctx) {
-                if (ctx == recomp::config::OptionChangeContext::Load) return;
-                recompui::file::open_file_dialog([](bool success, const std::filesystem::path& path) {
-                    if (success) {
-                        recompui::config::get_config("wr64_textures").update_option_value(
-                            "tex_pack_dir", path.string());
-                        recompui::config::show_notification(recompui::config::NotificationType::Info,
-                            "Pack .zip selected — press Apply to load it.");
-                    }
-                });
-            });
-        tex_cfg.add_bool_option("tex_dump", "Dump Textures (advanced)",
-            "Write every texture the game loads to the 'textures_dump' folder "
-            "(raw N64 format). Decode them into editable PNGs + a loadable pack "
-            "with scripts/decode_texture_dump.py — see textures/README.md. For "
-            "creating packs; leave off for normal play.",
-            false);
-
-        auto apply_tex = []() {
-            recomp::config::Config& cfg = recompui::config::get_config("wr64_textures");
-            wr64_set_texture_pack(std::get<std::string>(cfg.get_option_value("tex_pack_dir")).c_str());
-            wr64_set_texture_replace(std::get<bool>(cfg.get_option_value("tex_enable")));
-            wr64_set_texture_dump(std::get<bool>(cfg.get_option_value("tex_dump")));
-        };
-        tex_cfg.set_load_callback(apply_tex);
-        tex_cfg.set_save_callback(apply_tex);
-    }
-
     // Mods tab: texture packs (.rtz containers, Zelda64Recomp-style). The
-    // content type below keys on rt64.json, so any pack dropped into mods/
-    // shows up here with a per-pack toggle.
+    // content type registered below keys on rt64.json, so any pack dropped
+    // into mods/ shows up here with a per-pack toggle. (This replaced the old
+    // single-pack "Textures" tab; WR64_TEXPACK remains as an env override and
+    // WR64_TEXDUMP still drives dump-for-authoring.)
     recompui::config::create_mods_tab();
 
     recompui::config::finalize();
@@ -884,7 +817,7 @@ int main(int argc, char* argv[]) {
     // rt64.json is a texture pack; the .rtz container extension wraps a pack
     // zip with no manifest required (one is auto-created from the filename).
     // Enabled packs are staged via wr64_mod_texture_pack_* and applied on the
-    // gfx thread together with the Textures-tab pack.
+    // gfx thread (composed with the WR64_TEXPACK env pack, if any).
     recomp::mods::ModContentType texture_pack_content_type{
         .content_filename = "rt64.json",
         .allow_runtime_toggle = true,
