@@ -88,7 +88,8 @@ public:
     recompui::Svg* clouds = nullptr;
     recompui::Svg* birds_a = nullptr;  // wings up }  crossfaded at ~2.6 Hz
     recompui::Svg* birds_b = nullptr;  // wings down } for the flap effect
-    recompui::Svg* dolphins = nullptr; // periodic jump arc between far/mid waves
+    recompui::Svg* dolphin1 = nullptr; // periodic jump arcs; drawn behind the mid
+    recompui::Svg* dolphin2 = nullptr; // wave, which hides them while "underwater"
     recompui::Svg* jetski = nullptr;   // races along the mid wave, behind the near one
     recompui::Svg* flare = nullptr;    // lens-flare ghosts + anamorphic streak
 
@@ -127,20 +128,24 @@ protected:
             birds_a->set_opacity(flap);
             birds_b->set_opacity(1.0f - flap);
         }
-        // Dolphins: a periodic jump — they rise out of the water in an arc
-        // (fading in), then dive back (fading out) and rest underwater for
-        // the remainder of the cycle.
-        if (dolphins != nullptr) {
-            const float cycle = std::fmod(t, 7.5f) / 7.5f;   // 0..1
-            const float a = cycle / 0.42f;                   // jump = first 42%
+        // Dolphins: real jump arcs. The art sits DEEP (y~830 of 900) so the mid
+        // wave in front hides it while "underwater"; a jump is a parabolic rise
+        // with forward travel — the dolphin breaks the surface, arcs over, and
+        // dives back down, occluded again by the wave. No opacity tricks.
+        auto dolphin_jump = [&](recompui::Svg* svg, float period, float phase_s,
+                                float jump_frac, float height_pct, float travel_pct) {
+            if (svg == nullptr) return;
+            const float cycle = std::fmod(t + phase_s, period) / period;   // 0..1
+            const float a = cycle / jump_frac;                             // jump portion
+            float dx = 0.0f, dy = 0.0f;
             if (a < 1.0f) {
-                const float arc = std::sin(a * 3.14159265f); // 0..1..0
-                dolphins->set_opacity(std::min(1.0f, arc * 2.2f));
-                dolphins->set_translate_2D(0.6f * a, -50.0f - 3.4f * arc, recompui::Unit::Percent);
-            } else {
-                dolphins->set_opacity(0.0f);
+                dy = -height_pct * std::sin(a * 3.14159265f);  // parabola up & back
+                dx = travel_pct * (a - 0.5f);                  // steady forward travel
             }
-        }
+            svg->set_translate_2D(dx, -50.0f + dy, recompui::Unit::Percent);
+        };
+        dolphin_jump(dolphin1, 9.0f, 0.0f, 0.34f, 21.0f, 5.0f);   // big, rightward
+        dolphin_jump(dolphin2, 9.0f, 4.1f, 0.30f, 17.0f, -4.0f);  // small, leftward
         // Jet ski: races across (rightward, faster than everything else),
         // with a quick chop-bounce on top of the mid wave's swell bob.
         if (jetski != nullptr) {
@@ -156,8 +161,10 @@ protected:
         // Lens flare: shimmer slightly out of phase with the sun pulse, with a
         // slow second component so the ghosts "breathe" rather than strobe.
         if (flare != nullptr) {
-            flare->set_opacity(0.55f + 0.25f * std::sin(t * TWO_PI / 6.0f + 0.9f)
-                                     + 0.20f * std::sin(t * TWO_PI / 17.0f));
+            float fo = 0.78f + 0.22f * std::sin(t * TWO_PI / 6.0f + 0.9f)
+                             + 0.12f * std::sin(t * TWO_PI / 17.0f);
+            if (fo > 1.0f) fo = 1.0f;
+            flare->set_opacity(fo);
         }
         if (spray != nullptr) {
             spray->set_opacity(0.70f + 0.30f * std::sin(t * 2.3f));
@@ -1061,7 +1068,8 @@ int main(int argc, char* argv[]) {
         anim->birds_b = make_layer("wr64_bg_birds_b.svg", 200.0f);
         make_layer("wr64_bg_island.svg", 100.0f);  // static: the far wave laps at it
         anim->far_    = make_layer("wr64_bg_wave_far.svg", 200.0f);
-        anim->dolphins = make_layer("wr64_bg_dolphins.svg", 100.0f);
+        anim->dolphin1 = make_layer("wr64_bg_dolphin1.svg", 100.0f);
+        anim->dolphin2 = make_layer("wr64_bg_dolphin2.svg", 100.0f);
         anim->mid     = make_layer("wr64_bg_wave_mid.svg", 200.0f);
         anim->jetski  = make_layer("wr64_bg_jetski.svg", 200.0f);
         anim->near_   = make_layer("wr64_bg_wave_near.svg", 200.0f);

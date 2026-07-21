@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="#1a6fb0"/>
-      <stop offset="45%" stop-color="#4aa8d8"/>
-      <stop offset="72%" stop-color="#bfe9f7"/>
-      <stop offset="100%" stop-color="#eafbff"/>
+      <stop offset="0%"  stop-color="#2286cc"/>
+      <stop offset="45%" stop-color="#54bbe8"/>
+      <stop offset="72%" stop-color="#cdf1fc"/>
+      <stop offset="100%" stop-color="#f2fdff"/>
     </linearGradient>
     <radialGradient id="sunglow" cx="50%" cy="94%" r="60%">
-      <stop offset="0%"  stop-color="#fff6d8" stop-opacity="0.9"/>
-      <stop offset="30%" stop-color="#ffe39a" stop-opacity="0.45"/>
+      <stop offset="0%"  stop-color="#fff8dc" stop-opacity="0.95"/>
+      <stop offset="30%" stop-color="#ffe8a4" stop-opacity="0.5"/>
       <stop offset="100%" stop-color="#ffe39a" stop-opacity="0"/>
     </radialGradient>
   </defs>

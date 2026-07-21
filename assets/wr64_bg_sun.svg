@@ -1,24 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
   <defs>
     <radialGradient id="aura" cx="50%" cy="50%" r="50%">
-      <stop offset="0%"  stop-color="#fffbe6" stop-opacity="0.95"/>
-      <stop offset="28%" stop-color="#fff3c0" stop-opacity="0.55"/>
-      <stop offset="60%" stop-color="#ffe39a" stop-opacity="0.22"/>
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="1.0"/>
+      <stop offset="22%" stop-color="#fff6d0" stop-opacity="0.8"/>
+      <stop offset="52%" stop-color="#ffe9a4" stop-opacity="0.38"/>
       <stop offset="100%" stop-color="#ffe39a" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="core" cx="50%" cy="50%" r="50%">
-      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.95"/>
-      <stop offset="60%" stop-color="#fffbe6" stop-opacity="0.75"/>
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="1.0"/>
+      <stop offset="55%" stop-color="#fffdf2" stop-opacity="0.95"/>
       <stop offset="100%" stop-color="#fff3c0" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <!-- wide soft aura -->
-  <circle cx="800" cy="620" r="330" fill="url(#aura)"/>
-  <!-- bright core -->
-  <circle cx="800" cy="620" r="150" fill="url(#core)"/>
-  <circle cx="800" cy="620" r="96" fill="#fffbe6" opacity="0.75"/>
-  <!-- glitter on the water -->
-  <g opacity="0.4" fill="#fff4c8">
+  <circle cx="800" cy="620" r="380" fill="url(#aura)"/>
+  <circle cx="800" cy="620" r="170" fill="url(#core)"/>
+  <circle cx="800" cy="620" r="104" fill="#ffffff" opacity="0.95"/>
+  <g opacity="0.55" fill="#fff4c8">
     <rect x="716" y="612" width="168" height="7" rx="3.5"/>
     <rect x="694" y="636" width="212" height="7" rx="3.5"/>
     <rect x="668" y="664" width="264" height="8" rx="4"/>

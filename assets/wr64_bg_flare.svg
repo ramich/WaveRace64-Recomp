@@ -1,36 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
   <defs>
-    <linearGradient id="streak" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="#fff6d8" stop-opacity="0"/>
-      <stop offset="35%"  stop-color="#fff6d8" stop-opacity="0.45"/>
-      <stop offset="50%"  stop-color="#ffffff" stop-opacity="0.8"/>
-      <stop offset="65%"  stop-color="#fff6d8" stop-opacity="0.45"/>
-      <stop offset="100%" stop-color="#fff6d8" stop-opacity="0"/>
-    </linearGradient>
     <radialGradient id="g1" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ffe9b0" stop-opacity="0.55"/>
-      <stop offset="80%" stop-color="#ffe9b0" stop-opacity="0.12"/>
+      <stop offset="0%" stop-color="#ffe9b0" stop-opacity="0.9"/>
+      <stop offset="80%" stop-color="#ffe9b0" stop-opacity="0.2"/>
       <stop offset="100%" stop-color="#ffe9b0" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="g2" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#a8e8e0" stop-opacity="0.4"/>
-      <stop offset="75%" stop-color="#a8e8e0" stop-opacity="0.1"/>
+      <stop offset="0%" stop-color="#a8e8e0" stop-opacity="0.7"/>
+      <stop offset="75%" stop-color="#a8e8e0" stop-opacity="0.18"/>
       <stop offset="100%" stop-color="#a8e8e0" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="ring" cx="50%" cy="50%" r="50%">
-      <stop offset="70%" stop-color="#ffd7e8" stop-opacity="0"/>
-      <stop offset="86%" stop-color="#ffd7e8" stop-opacity="0.28"/>
+      <stop offset="66%" stop-color="#ffd7e8" stop-opacity="0"/>
+      <stop offset="84%" stop-color="#ffd7e8" stop-opacity="0.55"/>
       <stop offset="100%" stop-color="#bfe4ff" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <!-- anamorphic horizontal streak through the sun -->
-  <rect x="360" y="612" width="880" height="16" rx="8" fill="url(#streak)"/>
-  <rect x="560" y="616" width="480" height="8" rx="4" fill="#ffffff" opacity="0.35"/>
-  <!-- ghost chain along the sun->center axis (straight up from the sun) -->
-  <circle cx="800" cy="505" r="26" fill="url(#g1)"/>
-  <circle cx="800" cy="420" r="14" fill="url(#g2)"/>
-  <circle cx="800" cy="330" r="34" fill="url(#g1)"/>
-  <circle cx="800" cy="240" r="18" fill="url(#g2)"/>
-  <circle cx="800" cy="140" r="52" fill="url(#ring)"/>
-  <circle cx="800" cy="66"  r="10" fill="url(#g1)"/>
+  <circle cx="800" cy="505" r="34" fill="url(#g1)"/>
+  <circle cx="800" cy="420" r="19" fill="url(#g2)"/>
+  <circle cx="800" cy="330" r="46" fill="url(#g1)"/>
+  <circle cx="800" cy="240" r="24" fill="url(#g2)"/>
+  <circle cx="800" cy="140" r="68" fill="url(#ring)"/>
+  <circle cx="800" cy="66"  r="14" fill="url(#g1)"/>
 </svg>

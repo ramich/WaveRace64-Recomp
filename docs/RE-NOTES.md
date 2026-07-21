@@ -1096,9 +1096,12 @@ wing poses (wr64_bg_birds_a/b.svg), crossfaded at ~2.6 Hz for a flap effect,
 gliding faster than the clouds behind them.
 
 Second pass (same day, user request): island + palm (static, behind the far
-wave so the surf laps at it), TWO DOLPHINS between far/mid waves doing a
-periodic jump (opacity+translate arc: rise/fade-in, dive/fade-out, rest
-underwater ~58% of a 7.5 s cycle), a JET SKI with rider racing rightward
+wave so the surf laps at it), TWO DOLPHINS (one layer each) doing
+periodic jump arcs — the art sits DEEP (y~830/900) so the mid wave in front
+OCCLUDES it at rest; a jump is a parabolic translate (sin arc up + linear
+forward travel, 9 s cycle, phase-offset, opposite directions) so they break
+the surface, arc over with spray droplets, and dive back — no opacity tricks
+(v2; the first version faded them in/out, which read as popping), a JET SKI with rider racing rightward
 between mid/near waves (left% drift at 11%/s, mid-wave swell bob + fast chop
 bounce; two copies 1600 apart = seamless), a layered SUN AURA (wide radial
 glow + bright core), and a LENS FLARE layer above the water (anamorphic
