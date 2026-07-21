@@ -39,7 +39,7 @@ process left behind.
 | **Phase 4** | Build & Link (RT64 + Runtime) | **COMPLETE** |
 | **Phase 5** | Audio & Input | **COMPLETE** -- input verified by hand, audio via recompiled RSP microcode at 32 kHz |
 | **Phase 6** | Game-Specific Fixes | **IN PROGRESS** -- attract mode, menus, and races stable (races exercised extensively by the automated race driver, `scripts/drive_to_race.ps1`). One reproducible crash in a later course is under investigation (see Known Limitations) |
-| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand) with a stock-borders mode, per-scene 4:3 menus, camera FOV widened via shipped instruction patches, FPS + target-framerate readout, dev inspector, resolution up to 4x, custom launcher branding (background art + wordmark + app icon), and the RecompFrontend launcher UI with a game-specific **Enhancements** tab (borders / FOV / wave-grid / reset) |
+| **Phase 7** | Enhancements | **IN PROGRESS** -- widescreen (RT64 Expand) with a stock-borders mode, per-scene 4:3 menus, camera FOV widened via shipped instruction patches, FPS + target-framerate readout, dev inspector, resolution up to 4x, custom launcher branding (background art + wordmark + app icon), **full-window presentation via Overscan Crop** (1P + 2P split-screen, GLideN64-style with projection compensation), an in-window **FPS overlay**, and the RecompFrontend launcher UI with a game-specific **Enhancements** tab (overscan / FOV / wave-grid / smooth-water / unlock) |
 | **Phase 8** | Release Preparation | Not Started |
 
 > **Playable.** The game boots, the launcher and in-game settings respond to
@@ -71,7 +71,8 @@ process left behind.
   integrated. Display settings (resolution up to 4x, MSAA, framerate, fullscreen)
   apply live; **controls are fully rebindable** (the port routes input through
   recompinput, so the Controls tab actually takes effect). A game-specific
-  **Enhancements** tab exposes border removal, camera FOV with a real
+  **Enhancements** tab exposes the **Overscan Crop** (full-window presentation,
+  default on), camera FOV with a real
   **Reset to 45°** action button, wave-grid size, and an **Unlock** button
   (marks every difficulty complete in the EEPROM save — keeps a
   `.unlock_backup` — applied on next game start). A **Textures** tab enables
@@ -89,8 +90,9 @@ process left behind.
 - **Widescreen rough edges** (needs game patches): objects can pop in at the screen
   edges because the game culls against its original frustum — confirmed NOT to
   follow the camera FOV. HUD/menu handling is solved (per-scene presentation below)
-- **Borders removed by default** (launcher **Enhancements → Show Borders**, or
-  `WR64_BORDERS=1`, restores the stock look): the game draws black CRT-overscan
+- **Borders removed by default** (`WR64_BORDERS=1` or `show_borders` in
+  `wr64_settings.json` restores the stock look; the launcher toggle is hidden
+  now that the Overscan Crop supersedes it): the game draws black CRT-overscan
   borders inside its own framebuffer; the port widens the game's scissors
   (top-level and sub-DL), ships the camera FOV widened 45° → 47.75° via recompiler
   instruction patches (5 bisected sites incl. the in-race camera), stretches the
@@ -111,7 +113,7 @@ process left behind.
 | Setting | Effect |
 |---------|--------|
 | `WR64_WIDESCREEN=0` | Force original 4:3 aspect (default: expand 3D to the window) |
-| `WR64_BORDERS=1` | Restore the original in-framebuffer black borders (also togglable in the launcher **Enhancements** tab; the env var overrides the saved setting). Border removal is the **default**: scissors (top-level and sub-DL) are widened, the atmosphere tint covers the full frame, the wave grid is enlarged, the HUD keeps proportions in widescreen, and 2D menus present as centered 4:3. Stock (borders-on) mode uses RT64 `Original` aspect and is chosen at launch — changing it needs a restart. Remaining widescreen seams: the shore strip and the water-foam framebuffer effect (see RE-NOTES) |
+| `WR64_BORDERS=1` | Restore the original in-framebuffer black borders (boot-time stock mode; the launcher toggle is hidden since the Overscan Crop superseded it — use this env var or `wr64_settings.json`). Border removal is the **default**: scissors (top-level and sub-DL) are widened, the atmosphere tint covers the full frame, the wave grid is enlarged, the HUD keeps proportions in widescreen, and 2D menus present as centered 4:3. Stock (borders-on) mode uses RT64 `Original` aspect and is chosen at launch — changing it needs a restart. Remaining widescreen seams: the shore strip and the water-foam framebuffer effect (see RE-NOTES) |
 | `WR64_WAVEGRID=RxC` | Detail-water mesh grid size override (default `23x55`, stock game `19x35`, clamped to `40x96`). Larger grids extend the detailed foam water further into widescreen margins at negligible cost on PC |
 | `WR64_SCENE_ASPECT=0` | Disable the per-scene 4:3 menu presentation (keep everything widescreen). Only relevant while borders are removed (default) |
 | `WR64_SCENE_DEBUG=1` | Log the scene classifier (`[SCENE] world= menuworld= ... -> wide/menu`) |
@@ -121,6 +123,7 @@ process left behind.
 | `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. The former **cloud stutter** artifact is fixed (see `WR64_VTXINTERP` below). See `docs/RE-NOTES.md` |
 | `WR64_VTXINTERP=N` | Per-vertex interpolation for small CPU-animated meshes at high FPS — this is what makes the **drifting clouds smooth** instead of snapping at 20 Hz. The value is a max-vertex-count threshold per transform: default **64** (unset or `1`), `0` disables. The threshold keeps the camera-anchored wave mesh (350–870 verts) on its original snapped animation — interpolating it warps the water. `WR64_VTXINTERP_DEBUG=1` logs per-transform velocity stats. See RE-NOTES "Cloud stutter — SOLVED" |
 | `WR64_VTXINTERP_RIGID=1` | **Experimental** smooth-water: rigid-translation interpolation of the large wave meshes (also togglable in the launcher **Enhancements → Smooth Water**). Off by default — the wave motion can read wrong; see RE-NOTES "Wave-mesh interpolation" |
+| `WR64_OVERSCAN=0` | Disable the **Overscan Crop** (also togglable in the launcher **Enhancements** tab, default on): a GLideN64-style final-stage crop of the TV-overscan margins with scale-up, so gameplay fills the whole window (1P and 2P split-screen) with the 3D proportions fully compensated. See RE-NOTES "Overscan crop = full-window presentation" |
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |

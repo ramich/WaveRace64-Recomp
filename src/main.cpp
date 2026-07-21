@@ -35,6 +35,8 @@
 #include "recompinput/input_events.h"
 #include "recompinput/players.h"
 #include "util/file.h"   // recompui folder/file pickers (NFD-backed)
+#include "core/ui_context.h"     // create_context (FPS overlay)
+#include "elements/ui_label.h"
 #include "nfd.h"
 
 // WR64-specific renderer settings exposed by rt64_render_context.cpp.
@@ -42,6 +44,7 @@ extern void wr64_set_show_borders(bool show);
 extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
 extern void wr64_set_fov_degrees(float deg);
 extern "C" void wr64_set_wave_interp(bool enabled);
+extern "C" void wr64_set_overscan_crop(bool enabled);
 extern void wr64_set_texture_pack(const char* dir);
 extern void wr64_set_texture_replace(bool enabled);
 extern void wr64_set_texture_dump(bool enabled);
@@ -303,18 +306,21 @@ static void update_gfx(void* /*gfx_data*/) {
     }
 #endif
 
-    // Title bar: measured FPS + selected target framerate + texture-replacement
-    // state. FPS is recomputed on a 1s tick, but the title is ALSO refreshed the
-    // instant the TEX state changes (e.g. F4 toggle) so it never lags behind.
+    // Title bar: friendly static info (target framerate + texture-pack state);
+    // the measured FPS lives in the in-window overlay below. Refreshed on a 1s
+    // tick and the instant the TEX state changes (e.g. F4) so it never lags.
     static uint32_t last_ticks = 0;
-    static float    last_fps = 0.0f;
+    static float    last_fps = 0.0f;          // game-frame rate (~20), gates the overlay
+    static float    last_present_fps = 0.0f;  // presented rate (incl. interpolation)
     static int      last_tex = -2;  // -1 no pack, 0 off, 1 on; -2 = force first draw
     uint32_t now = SDL_GetTicks();
     bool tick = (now - last_ticks >= 1000);
     if (tick) {
         uint32_t frames = wr64::rt64_consume_frame_count();
+        uint32_t presents = wr64::rt64_consume_present_count();
         if (last_ticks != 0) {
             last_fps = frames * 1000.0f / (now - last_ticks);
+            last_present_fps = presents * 1000.0f / (now - last_ticks);
         }
         last_ticks = now;
     }
@@ -324,12 +330,62 @@ static void update_gfx(void* /*gfx_data*/) {
         last_tex = tex;
         uint32_t target = ultramodern::get_target_framerate(60);
         const char* texs = (tex < 0) ? ""
-                         : (tex == 1) ? "  |  TEX: ON (HD)" : "  |  TEX: OFF (original)";
-        char title[128];
-        SDL_snprintf(title, sizeof(title), "Wave Race 64 - %.1f FPS (target %u)%s",
-                     last_fps, target, texs);
+                         : (tex == 1) ? "   \xE2\x80\xA2   HD Textures: On"
+                                      : "   \xE2\x80\xA2   HD Textures: Off";
+        char title[160];
+        SDL_snprintf(title, sizeof(title),
+                     "Wave Race 64 - Recompiled   \xE2\x80\xA2   Target: %u FPS%s",
+                     target, texs);
         SDL_SetWindowTitle(window, title);
     }
+
+#ifdef HAS_RECOMPUI
+    // In-window FPS readout: a small always-on overlay label in the top-right
+    // corner of the game window, updated on the same 1s tick. Lives in its own
+    // recompui context with no focusable elements, so it never affects
+    // keyboard/controller navigation or game input.
+    if (tick && last_fps > 0.0f) {
+        static recompui::ContextId fps_ctx = {};
+        static recompui::Label* fps_label = nullptr;
+        static bool fps_shown = false;
+        if (fps_label == nullptr) {
+            fps_ctx = recompui::create_context();
+            // The overlay must NEVER capture input: recompinput disables game
+            // input while any shown context captures it (that is how the
+            // settings menu takes over), and a capturing always-on overlay
+            // would kill in-game keyboard/controller input.
+            fps_ctx.set_captures_input(false);
+            fps_ctx.set_captures_mouse(false);
+            fps_ctx.open();
+            // Small translucent pill so the readout stays legible over bright
+            // sky/water.
+            recompui::Element* pill = fps_ctx.create_element<recompui::Element>(
+                fps_ctx.get_root_element());
+            pill->set_position(recompui::Position::Absolute);
+            pill->set_top(8.0f);
+            pill->set_right(14.0f);
+            pill->set_padding_top(2.0f);
+            pill->set_padding_bottom(2.0f);
+            pill->set_padding_left(10.0f);
+            pill->set_padding_right(10.0f);
+            pill->set_border_radius(10.0f);
+            pill->set_background_color(recompui::Color{ 0, 0, 0, 110 });
+            fps_label = fps_ctx.create_element<recompui::Label>(
+                pill, "", recompui::LabelStyle::Small);
+            fps_label->set_color(recompui::theme::color::Text);
+            fps_ctx.close();
+        }
+        char fps_text[32];
+        SDL_snprintf(fps_text, sizeof(fps_text), "%.0f FPS", last_present_fps);
+        fps_ctx.open();
+        fps_label->set_text(fps_text);
+        fps_ctx.close();
+        if (!fps_shown) {
+            recompui::show_context(fps_ctx, "");
+            fps_shown = true;
+        }
+    }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -562,12 +618,16 @@ int main(int argc, char* argv[]) {
     // WR64-specific game settings tab.
     {
         recomp::config::Config& wr64_cfg = recompui::config::create_config_tab("Enhancements", "wr64_settings", true);
+        // Hidden since the Overscan Crop landed: the stock-borders boot mode is
+        // superseded by overscan (which crops the borders properly, 1P and 2P)
+        // and its restart-required UX was confusing. Still functional for power
+        // users via wr64_settings.json ("show_borders") or WR64_BORDERS=1.
         wr64_cfg.add_bool_option("show_borders", "Show Borders (restart required)",
             "Restore the original 4:3 presentation with the game's black overscan "
             "borders, pillarboxed at correct proportions. Off by default: the image "
             "is widened edge-to-edge to fill the window. Changing this takes effect "
             "after restarting the game (the renderer aspect ratio is fixed at launch).",
-            false);
+            false, /* hidden */ true);
         wr64_cfg.add_number_option("fov_degrees", "Field of View",
             "Camera FOV in degrees. Default 47.75 (wider than original 45°). "
             "Higher values show more of the scene horizontally.",
@@ -586,6 +646,13 @@ int main(int argc, char* argv[]) {
                 {3u, "widest",   "Widest (32x78)"},
                 {4u, "maximum",  "Maximum (40x96)"},
             }, 1u);
+        wr64_cfg.add_bool_option("overscan_crop", "Overscan Crop",
+            "Crop the TV-overscan margins during gameplay (with scale-up), like "
+            "a real television did: the border bands and the garbage strip at "
+            "the frame edges disappear and the game fills the whole window. "
+            "The 3D view keeps its proportions; the HUD gets the original TV "
+            "framing (slightly larger).",
+            true);
         wr64_cfg.add_bool_option("wave_interp", "Smooth Water (experimental)",
             "Interpolate the wave mesh at high framerates so the water slides "
             "smoothly instead of stepping at the game's native 20 Hz. "
@@ -638,6 +705,7 @@ int main(int argc, char* argv[]) {
             wr64_set_wavegrid(rows[idx], cols[idx]);
 
             wr64_set_wave_interp(std::get<bool>(cfg.get_option_value("wave_interp")));
+            wr64_set_overscan_crop(std::get<bool>(cfg.get_option_value("overscan_crop")));
         };
         wr64_cfg.set_load_callback(apply_wr64);
         wr64_cfg.set_save_callback(apply_wr64);

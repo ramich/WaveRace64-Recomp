@@ -57,6 +57,16 @@ extern "C" void rt64_wr64_set_wide_world(int enabled);
 // rt64_framebuffer_renderer.cpp / rt64_vi_renderer.cpp).
 extern "C" void rt64_wr64_set_vertex_interp(int enabled);
 extern "C" void rt64_wr64_set_vertex_interp_rigid(int enabled);
+extern "C" void rt64_wr64_set_overscan(float l, float r, float t, float b);
+extern "C" void rt64_wr64_set_split_remap(int enabled);
+
+// Launcher hook (Enhancements -> Overscan Crop): crop the TV-overscan margins
+// (WR64 content rect (8,20)-(310,218) of 320x240) at present time with
+// scale-up, so gameplay fills the window vertically and the junk rows vanish.
+static std::atomic<bool> s_overscan_enabled{true};
+extern "C" void wr64_set_overscan_crop(bool enabled) {
+    s_overscan_enabled.store(enabled);
+}
 
 // Launcher hook (Enhancements -> Smooth Water, experimental): rigid-translation
 // interpolation of the large wave meshes at high FPS.
@@ -809,6 +819,12 @@ public:
                 rt64_wr64_set_vertex_interp_rigid(1);
                 fprintf(stderr, "[WR64] experimental smooth-water interpolation enabled (env)\n");
             }
+            // Overscan crop: env override (default on; launcher option rules).
+            const char* ov_env = std::getenv("WR64_OVERSCAN");
+            if (ov_env && ov_env[0] == '0') {
+                s_overscan_enabled.store(false);
+                fprintf(stderr, "[WR64] overscan crop disabled (env)\n");
+            }
         }
 
         printf("[WR64-RT64] Renderer context created (result=%d, api=%d)\n",
@@ -1023,6 +1039,34 @@ public:
                     } else {
                         rt64_wr64_set_split_bands(0.0f, 1.0f, 0.0f, 0.0f);
                     }
+
+                    // Overscan crop (GLideN64-style, launcher Enhancements ->
+                    // Overscan Crop): during plain widescreen gameplay, crop
+                    // the vertical TV-overscan margins (content rows 20..218 of
+                    // 240) at present time WITH scale-up — the top junk rows
+                    // and the VI border bands vanish and the game fills the
+                    // window vertically. The projection processor compensates
+                    // the 3D vertical FOV so the world keeps its proportions
+                    // and coverage. Menus (crop43) and 2P split-screen keep the
+                    // plain present. Horizontal stays 0: border removal already
+                    // fills the width with real content.
+                    rt64_wr64_set_split_remap((split_active && s_overscan_enabled.load()) ? 1 : 0);
+                    if (split_active && s_overscan_enabled.load()) {
+                        // 2P split-screen: the two-band present remaps each
+                        // half's content band to fill its half of the window
+                        // (vertical crop handled there); here only the side
+                        // insets are cropped (2P content rect x = 8..311).
+                        rt64_wr64_set_overscan(8.0f / 320.0f, 9.0f / 320.0f, 0.0f, 0.0f);
+                    } else if (!split_active && is_gameplay && s_overscan_enabled.load()) {
+                        // The game's content rect is (8,20)-(310,218) of
+                        // 320x240 — crop the overscan margins on all four
+                        // edges (the logical VI space stays 320x240 even in
+                        // Expand, so these fractions hold in widescreen).
+                        rt64_wr64_set_overscan(8.0f / 320.0f, 10.0f / 320.0f,
+                                               20.0f / 240.0f, 22.0f / 240.0f);
+                    } else {
+                        rt64_wr64_set_overscan(0.0f, 0.0f, 0.0f, 0.0f);
+                    }
                 }
                 // NOTE (top garbage strip, deferred): framebuffer rows 0-19 sit
                 // above the game's content scissor and hold uncleared scratch a
@@ -1226,6 +1270,7 @@ public:
             rt64_wr64_set_viewport_widen(0);
             rt64_wr64_set_wide_world(0);
             rt64_wr64_set_present_crop43(0);
+            rt64_wr64_set_overscan(0.0f, 0.0f, 0.0f, 0.0f);
             s_crop_requested = -1;
             wr32g(app_->core.RDRAM, 0x800DA8B8u, 19u);
             wr32g(app_->core.RDRAM, 0x800DA8BCu, 35u);
@@ -1550,6 +1595,13 @@ bool rt64_handle_sdl_event(void* sdl_event) {
 
 uint32_t rt64_consume_frame_count() {
     return s_frame_count.exchange(0, std::memory_order_relaxed);
+}
+
+// Presented frames (incl. interpolated) since last consumption — the number
+// the user perceives as FPS. Counted in the rt64 fork's VI present.
+extern "C" uint32_t rt64_wr64_consume_present_count();
+uint32_t rt64_consume_present_count() {
+    return rt64_wr64_consume_present_count();
 }
 
 bool rt64_texture_pack_loaded() {

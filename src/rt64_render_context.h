@@ -43,6 +43,8 @@ bool rt64_handle_sdl_event(void* sdl_event);
  * call, for FPS display. Thread-safe.
  */
 uint32_t rt64_consume_frame_count();
+// Presented frames (incl. interpolated) since last consumption — perceived FPS.
+uint32_t rt64_consume_present_count();
 
 // True once a WR64_TEXPACK replacement pack has been loaded this session.
 bool rt64_texture_pack_loaded();

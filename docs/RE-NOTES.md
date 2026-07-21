@@ -969,3 +969,50 @@ exposed by widescreen — a top present-band crop worked but read as a
 mismatched black bar; the proper fix belongs to the planned FULL-WINDOW
 presentation (game content fills the entire window, overscan cropped as part
 of the scale-up). That is the next big presentation milestone.
+
+## Overscan crop = full-window presentation — SOLVED (2026-07-21)
+
+The FULL-WINDOW goal (whole window = game content, no letterbox rectangle, top
+junk gone) is delivered via a GLideN64-style overscan crop (user-suggested,
+ref github.com/gonetz/GLideN64 OverscanBuffer): per-edge insets are cropped
+off the VI image at the FINAL present stage and the remaining content is
+scaled up to fill the previous display area — crop WITH zoom (a plain band
+crop had been rejected as a mismatched black bar). Because WR64's content
+rect is KNOWN — (8,20)-(310,218) of 320x240, and the logical VI space stays
+320x240 even under RT64 Expand (fbPair scissors prove it) — the insets are
+exact constants, no per-game tuning like GLideN64 needs.
+
+What makes ours better than GLideN64's: PROJECTION COMPENSATION. Cropping
+rows/columns stretches the display per axis; the projection processor
+pre-scales the projection matrix columns by exactly the inverse (X column *=
+(1-l-r), Y column *= (1-t-b), perspective projections in live gameplay only)
+so the 3D world keeps IDENTICAL proportions and coverage — only the junk
+disappears. 2D/HUD is screen-space and takes the (authentic) TV framing,
+i.e. slightly larger.
+
+2P split-screen: the two-band present gained a per-half REMAP — each half's
+content band (top src rows 12..120, bottom 122..229 of 240) maps onto its
+half of the window with a thin divider (0.8%), side insets x=8..311 cropped
+like 1P, and a PER-HALF vertical FOV compensation (rt64_wr64_split_yscale).
+Gated by the same toggle (rt64_wr64_set_split_remap); off = classic gutter
+bands. User-verified in 2P.
+
+Wiring: rt64 hooks rt64_wr64_set_overscan(l,r,t,b) + xscale/yscale getters +
+split remap; port sets per frame (gameplay: all four edges; split: sides
+only; menus/stock: zero). Launcher: Enhancements -> "Overscan Crop", default
+ON, applies live; WR64_OVERSCAN=0 env kill-switch. The "Show Borders" boot
+mode option is now HIDDEN in the UI (superseded; still works via
+wr64_settings.json / WR64_BORDERS=1).
+
+Related same-day findings:
+- FPS: the frame counter counted GAME frames (DL submissions, ~20 Hz by
+  design). Perceived FPS = presents (incl. interpolated) — now counted in the
+  fork's VI present (rt64_wr64_consume_present_count) and shown in a new
+  in-window top-right overlay pill; the window title is now static-friendly
+  ("Wave Race 64 - Recompiled • Target: N FPS • HD Textures: On/Off").
+- CRITICAL recompui lesson: a SHOWN context CAPTURES INPUT by default, and
+  recompinput disables ALL game input while any shown context captures
+  (recompinput game_input_disabled -> recompui is_context_capturing_input).
+  The always-on FPS overlay killed in-game keyboard until
+  set_captures_input(false)/set_captures_mouse(false). Any future overlay
+  context MUST clear both flags.
