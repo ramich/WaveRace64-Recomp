@@ -928,12 +928,12 @@ int main(int argc, char* argv[]) {
             "Experimental: the wave motion can look off — turn it off if the "
             "water seems wrong. Clouds and sprites are always smoothed.",
             false);
-        wr64_cfg.add_percent_number_option("motion_blur", "Motion Blur (experimental)",
+        wr64_cfg.add_percent_number_option("motion_blur", "Motion Blur (experimental, 0% = off)",
             "Accumulation motion blur at the final present: each frame keeps a "
-            "fading trail of the previous ones. 0% = off. Prototype — it smears "
-            "everything in the game image uniformly (the launcher UI stays "
-            "sharp); higher values leave longer trails. Works best with a 60 FPS "
-            "framerate target.",
+            "fading trail of the previous ones. At 0% the effect is fully "
+            "disabled (no cost). Prototype — it smears everything in the game "
+            "image uniformly (the launcher UI stays sharp); higher values leave "
+            "longer trails. Works best with a 60 FPS framerate target.",
             0.0);
         wr64_cfg.add_button_option("unlock_courses", "Unlock All Courses",
             "Mark every difficulty complete in the save file, unlocking all "
