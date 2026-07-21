@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3200 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <radialGradient id="cl" cx="50%" cy="35%" r="75%">
+      <stop offset="0%"  stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="70%" stop-color="#f2fbff" stop-opacity="0.75"/>
+      <stop offset="100%" stop-color="#e2f4fd" stop-opacity="0.0"/>
+    </radialGradient>
+  </defs>
+  <g fill="url(#cl)" opacity="0.85"><ellipse cx="210" cy="150" rx="103" ry="39"/><ellipse cx="139" cy="162" rx="67" ry="28"/><ellipse cx="286" cy="159" rx="71" ry="30"/><ellipse cx="187" cy="129" rx="60" ry="30"/><ellipse cx="244" cy="134" rx="53" ry="25"/></g>
+  <g fill="url(#cl)" opacity="0.85"><ellipse cx="1810" cy="150" rx="103" ry="39"/><ellipse cx="1739" cy="162" rx="67" ry="28"/><ellipse cx="1886" cy="159" rx="71" ry="30"/><ellipse cx="1787" cy="129" rx="60" ry="30"/><ellipse cx="1844" cy="134" rx="53" ry="25"/></g>
+  <g fill="url(#cl)" opacity="0.7"><ellipse cx="720" cy="95" rx="72" ry="27"/><ellipse cx="670" cy="103" rx="46" ry="19"/><ellipse cx="773" cy="101" rx="50" ry="21"/><ellipse cx="704" cy="81" rx="42" ry="21"/><ellipse cx="744" cy="84" rx="37" ry="18"/></g>
+  <g fill="url(#cl)" opacity="0.7"><ellipse cx="2320" cy="95" rx="72" ry="27"/><ellipse cx="2270" cy="103" rx="46" ry="19"/><ellipse cx="2373" cy="101" rx="50" ry="21"/><ellipse cx="2304" cy="81" rx="42" ry="21"/><ellipse cx="2344" cy="84" rx="37" ry="18"/></g>
+  <g fill="url(#cl)" opacity="0.8"><ellipse cx="1180" cy="200" rx="90" ry="34"/><ellipse cx="1118" cy="210" rx="58" ry="24"/><ellipse cx="1246" cy="208" rx="62" ry="26"/><ellipse cx="1160" cy="182" rx="52" ry="26"/><ellipse cx="1210" cy="186" rx="46" ry="22"/></g>
+  <g fill="url(#cl)" opacity="0.8"><ellipse cx="2780" cy="200" rx="90" ry="34"/><ellipse cx="2718" cy="210" rx="58" ry="24"/><ellipse cx="2846" cy="208" rx="62" ry="26"/><ellipse cx="2760" cy="182" rx="52" ry="26"/><ellipse cx="2810" cy="186" rx="46" ry="22"/></g>
+  <g fill="url(#cl)" opacity="0.6"><ellipse cx="1490" cy="120" rx="54" ry="20"/><ellipse cx="1453" cy="126" rx="35" ry="14"/><ellipse cx="1530" cy="125" rx="37" ry="16"/><ellipse cx="1478" cy="109" rx="31" ry="16"/><ellipse cx="1508" cy="112" rx="28" ry="13"/></g>
+  <g fill="url(#cl)" opacity="0.6"><ellipse cx="3090" cy="120" rx="54" ry="20"/><ellipse cx="3053" cy="126" rx="35" ry="14"/><ellipse cx="3130" cy="125" rx="37" ry="16"/><ellipse cx="3078" cy="109" rx="31" ry="16"/><ellipse cx="3108" cy="112" rx="28" ry="13"/></g>
+</svg>

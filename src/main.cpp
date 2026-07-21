@@ -39,6 +39,8 @@
 #include "recompinput/players.h"
 #include "core/ui_context.h"     // create_context (FPS overlay)
 #include "elements/ui_label.h"
+#include "elements/ui_svg.h"     // background layers (WR64BackgroundAnimator)
+#include <cmath>
 #include "nfd.h"
 
 // WR64-specific renderer settings exposed by rt64_render_context.cpp.
@@ -47,6 +49,7 @@ extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
 extern void wr64_set_fov_degrees(float deg);
 extern "C" void wr64_set_wave_interp(bool enabled);
 extern "C" void wr64_set_overscan_crop(bool enabled);
+extern "C" void wr64_set_motion_blur_percent(double percent);
 
 // FPS overlay configuration (set from the launcher Enhancements tab on the UI
 // thread, consumed by the overlay in update_gfx on the gfx thread).
@@ -67,6 +70,72 @@ static void wr64_game_toast(const std::string& msg, uint32_t duration_ms = 2500)
     s_toast_expiry_ms.store(SDL_GetTicks() + duration_ms);
     s_toast_gen.fetch_add(1);
 }
+
+// Animates the layered launcher background (created in the launcher init
+// callback below): the three wave bands drift horizontally with parallax and
+// bob vertically on offset sine phases, the sun pulses gently, and the spray
+// bubbles shimmer/sway. Receives per-frame Update events only while the
+// launcher context is shown, so it costs nothing in-game. Horizontal drift
+// uses `left` in percent over [-100, 0): the wave art is two periods wide, so
+// -100% lines the second period up exactly where the first was (seamless loop).
+class WR64BackgroundAnimator : public recompui::Element {
+public:
+    recompui::Svg* far_ = nullptr;
+    recompui::Svg* mid = nullptr;
+    recompui::Svg* near_ = nullptr;
+    recompui::Svg* sun = nullptr;
+    recompui::Svg* spray = nullptr;
+    recompui::Svg* clouds = nullptr;
+    recompui::Svg* birds_a = nullptr;  // wings up }  crossfaded at ~2.6 Hz
+    recompui::Svg* birds_b = nullptr;  // wings down } for the flap effect
+
+    WR64BackgroundAnimator(recompui::ResourceId rid, recompui::Element* parent)
+        : recompui::Element(rid, parent, recompui::Events(recompui::EventType::Update), "div", false) {
+        queue_update();  // update events are one-shot; re-queued in the handler
+    }
+
+protected:
+    std::string_view get_type_name() override { return "WR64BackgroundAnimator"; }
+
+    void process_event(const recompui::Event& e) override {
+        if (e.type != recompui::EventType::Update) {
+            return;
+        }
+        const float t = SDL_GetTicks() / 1000.0f;
+        constexpr float TWO_PI = 6.2831853f;
+        // Drift speed is %/s of the window width (one wave period = 100%);
+        // bob amplitude is % of the layer's own height via the translate.
+        auto wave = [&](recompui::Svg* svg, float drift_pct_s, float bob_amp, float bob_period, float phase) {
+            if (svg == nullptr) return;
+            svg->set_left(-std::fmod(t * drift_pct_s + phase * 13.7f, 100.0f), recompui::Unit::Percent);
+            svg->set_translate_2D(0.0f, -50.0f + bob_amp * std::sin(t * TWO_PI / bob_period + phase),
+                                  recompui::Unit::Percent);
+        };
+        wave(far_,  1.6f, 0.35f, 7.3f, 0.0f);   // slow distant swell
+        wave(mid,   3.0f, 0.55f, 5.1f, 2.1f);
+        wave(near_, 5.2f, 0.90f, 3.9f, 4.2f);   // fast breaking wave up front
+        wave(clouds, 0.7f, 0.08f, 11.0f, 1.0f); // clouds barely bob, drift slowly
+        // Birds glide across faster than the clouds behind them, bob gently,
+        // and flap by crossfading the two wing poses.
+        wave(birds_a, 2.4f, 0.30f, 4.6f, 0.5f);
+        wave(birds_b, 2.4f, 0.30f, 4.6f, 0.5f);
+        if (birds_a != nullptr && birds_b != nullptr) {
+            const float flap = 0.5f + 0.5f * std::sin(t * TWO_PI * 2.6f);
+            birds_a->set_opacity(flap);
+            birds_b->set_opacity(1.0f - flap);
+        }
+        if (sun != nullptr) {
+            sun->set_opacity(0.86f + 0.14f * std::sin(t * TWO_PI / 6.0f));
+            sun->set_translate_2D(0.0f, -50.0f + 0.15f * std::sin(t * 0.7f), recompui::Unit::Percent);
+        }
+        if (spray != nullptr) {
+            spray->set_opacity(0.70f + 0.30f * std::sin(t * 2.3f));
+            spray->set_translate_2D(0.30f * std::sin(t * 0.9f),
+                                    -50.0f + 0.50f * std::sin(t * 1.6f + 1.0f), recompui::Unit::Percent);
+        }
+        queue_update();  // keep the animation running
+    }
+};
 
 extern void wr64_mod_texture_pack_enabled(const std::string& mod_id);
 extern void wr64_mod_texture_pack_disabled(const std::string& mod_id);
@@ -821,6 +890,13 @@ int main(int argc, char* argv[]) {
             "Experimental: the wave motion can look off — turn it off if the "
             "water seems wrong. Clouds and sprites are always smoothed.",
             false);
+        wr64_cfg.add_percent_number_option("motion_blur", "Motion Blur (experimental)",
+            "Accumulation motion blur at the final present: each frame keeps a "
+            "fading trail of the previous ones. 0% = off. Prototype — it smears "
+            "everything in the game image uniformly (the launcher UI stays "
+            "sharp); higher values leave longer trails. Works best with a 60 FPS "
+            "framerate target.",
+            0.0);
         wr64_cfg.add_button_option("unlock_courses", "Unlock All Courses",
             "Mark every difficulty complete in the save file, unlocking all "
             "courses in Time Trials. Takes effect when the game (re)starts; "
@@ -868,6 +944,7 @@ int main(int argc, char* argv[]) {
 
             wr64_set_wave_interp(std::get<bool>(cfg.get_option_value("wave_interp")));
             wr64_set_overscan_crop(std::get<bool>(cfg.get_option_value("overscan_crop")));
+            wr64_set_motion_blur_percent(std::get<double>(cfg.get_option_value("motion_blur")));
 
             s_fps_show.store(std::get<bool>(cfg.get_option_value("fps_display")));
             s_fps_pos.store(std::get<uint32_t>(cfg.get_option_value("fps_position")));
@@ -927,14 +1004,39 @@ int main(int argc, char* argv[]) {
             {},
             GameOptionsMenuLayout::Center
         );
-        // Original wave-themed launcher backdrop (assets/wr64_background.svg).
-        // Not the copyrighted Nintendo logo/artwork — an original evocation.
-        menu->set_launcher_background_svg("wr64_background.svg");
+        // Original wave-themed launcher backdrop, split into layers so it can
+        // animate (waves drift + bob with parallax, sun pulses, spray bubbles
+        // shimmer — see WR64BackgroundAnimator). Same art style as the old
+        // static wr64_background.svg; still an original evocation, not the
+        // copyrighted Nintendo artwork. The wave layers are drawn 2 periods
+        // wide (200% width), so a left-drift over [-100%, 0) loops seamlessly.
+        menu->set_launcher_background_svg("wr64_bg_base.svg");
+        ContextId ctx = get_launcher_context_id();
+        Element* bg = menu->get_background_wrapper();
+        auto make_layer = [&](const char* file, float width_pct) {
+            Svg* svg = ctx.create_element<Svg>(bg, file);
+            svg->set_position(Position::Absolute);
+            svg->set_top(50.0f, Unit::Percent);
+            svg->set_left(0.0f, Unit::Percent);
+            svg->set_height_auto();
+            svg->set_width(width_pct, Unit::Percent);
+            svg->set_translate_2D(0.0f, -50.0f, Unit::Percent);
+            return svg;
+        };
+        WR64BackgroundAnimator* anim = ctx.create_element<WR64BackgroundAnimator>(menu);
+        anim->sun     = make_layer("wr64_bg_sun.svg", 100.0f);
+        anim->clouds  = make_layer("wr64_bg_clouds.svg", 200.0f);
+        anim->birds_a = make_layer("wr64_bg_birds_a.svg", 200.0f);
+        anim->birds_b = make_layer("wr64_bg_birds_b.svg", 200.0f);
+        anim->far_   = make_layer("wr64_bg_wave_far.svg", 200.0f);
+        anim->mid    = make_layer("wr64_bg_wave_mid.svg", 200.0f);
+        anim->near_  = make_layer("wr64_bg_wave_near.svg", 200.0f);
+        anim->spray  = make_layer("wr64_bg_spray.svg", 100.0f);
+        make_layer("wr64_bg_vignette.svg", 100.0f);  // static, keeps text readable
 
         // Original wordmark logo (assets/wr64_logo.svg — a Pillow-rendered water
         // gradient wordmark, our own design/effects with the bundled Lato font;
         // not the game's trademarked logo or font). Replaces the plain title.
-        ContextId ctx = get_launcher_context_id();
         menu->remove_default_title();
         Svg* logo = ctx.create_element<Svg>(menu, "wr64_logo.svg");
         logo->set_position(Position::Absolute);

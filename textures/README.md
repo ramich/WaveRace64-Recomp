@@ -21,6 +21,16 @@ zip root:
 Multiple enabled packs merge; the pack higher in the mod list wins for
 textures both packs replace (drag to reorder).
 
+> **Authoring properly:** see RT64's official
+> [TEXTURE-PACKS.md](../lib/rt64/TEXTURE-PACKS.md) and its texture-pack tools
+> (`texture_hasher`, `texture_packer`). Best practice: convert images to
+> **DDS** (≈4× less VRAM than PNG, enables mipmaps/anisotropic filtering),
+> generate the **low mipmap cache** (`texture_packer --create-low-mip-cache`,
+> eliminates streaming pop-in), then build the final `.rtz` with
+> `texture_packer --create-pack` (zstd-compressed — loads faster than a plain
+> zip; our loader supports it). PNG packs work but are meant for development.
+> `texture_hasher` consumes the dumps produced by `WR64_TEXDUMP` below.
+
 ## Enabling a pack by path (env override)
 
 Point the game at a pack directory and it loads at launch, composed with any

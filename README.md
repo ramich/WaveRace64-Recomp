@@ -77,9 +77,12 @@ process left behind.
   **Overscan Crop** (full-window presentation, default on), camera FOV with a
   real **Reset to 45°** action button, wave-grid size, an **Unlock** button
   (marks every difficulty complete in the EEPROM save — keeps a
-  `.unlock_backup` — applied on next game start), and a configurable **FPS
+  `.unlock_backup` — applied on next game start), a configurable **FPS
   overlay** (on/off, position, color, background opacity — the extra options
-  hide while the display is off). **HD texture packs are mods**: drop an
+  hide while the display is off), and an **experimental Motion Blur**
+  slider (present-time accumulation trail, default off). The launcher
+  background is an original animated seascape: parallax waves, drifting
+  clouds, gliding gulls, pulsing sun. **HD texture packs are mods**: drop an
   `.rtz` (a pack zip with `rt64.json`, optional `mod.json` + `thumb.png` for
   name/author/icon) into `mods/` and it appears in the **Mods tab** with a
   per-pack toggle; multiple enabled packs merge with mod-list order deciding
@@ -130,6 +133,7 @@ process left behind.
 | `WR64_VTXINTERP=N` | Per-vertex interpolation for small CPU-animated meshes at high FPS — this is what makes the **drifting clouds smooth** instead of snapping at 20 Hz. The value is a max-vertex-count threshold per transform: default **64** (unset or `1`), `0` disables. The threshold keeps the camera-anchored wave mesh (350–870 verts) on its original snapped animation — interpolating it warps the water. `WR64_VTXINTERP_DEBUG=1` logs per-transform velocity stats. See RE-NOTES "Cloud stutter — SOLVED" |
 | `WR64_VTXINTERP_RIGID=1` | **Experimental** smooth-water: rigid-translation interpolation of the large wave meshes (also togglable in the launcher **Enhancements → Smooth Water**). Off by default — the wave motion can read wrong; see RE-NOTES "Wave-mesh interpolation" |
 | `WR64_OVERSCAN=0` | Disable the **Overscan Crop** (also togglable in the launcher **Enhancements** tab, default on): a GLideN64-style final-stage crop of the TV-overscan margins with scale-up, so gameplay fills the whole window (1P and 2P split-screen) with the 3D proportions fully compensated. See RE-NOTES "Overscan crop = full-window presentation" |
+| `WR64_MOTIONBLUR=<0-90>` | **Experimental** motion blur (also a launcher **Enhancements** slider, default off): present-time accumulation — each frame keeps a fading trail of the previous ones. Moving content trails; the launcher UI stays sharp. Prototype with known visual side effects; see RE-NOTES "Motion blur prototype" |
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |

@@ -62,6 +62,7 @@ extern "C" void rt64_wr64_set_vertex_interp(int enabled);
 extern "C" void rt64_wr64_set_vertex_interp_rigid(int enabled);
 extern "C" void rt64_wr64_set_overscan(float l, float r, float t, float b);
 extern "C" void rt64_wr64_set_split_remap(int enabled);
+extern "C" void rt64_wr64_set_motion_blur(float strength);
 
 // Launcher hook (Enhancements -> Overscan Crop): crop the TV-overscan margins
 // (WR64 content rect (8,20)-(310,218) of 320x240) at present time with
@@ -75,6 +76,14 @@ extern "C" void wr64_set_overscan_crop(bool enabled) {
 // interpolation of the large wave meshes at high FPS.
 extern "C" void wr64_set_wave_interp(bool enabled) {
     rt64_wr64_set_vertex_interp_rigid(enabled ? 1 : 0);
+}
+
+// Launcher hook (Enhancements -> Motion Blur, experimental prototype):
+// present-time accumulation blur; percent 0-90 mapped to blend strength.
+extern "C" void wr64_set_motion_blur_percent(double percent) {
+    if (percent < 0.0) percent = 0.0;
+    if (percent > 90.0) percent = 90.0;
+    rt64_wr64_set_motion_blur(float(percent / 100.0));
 }
 extern "C" uint32_t rt64_wr64_split_half_draws();
 extern "C" float rt64_wr64_split_band_a0();
@@ -873,6 +882,12 @@ public:
             if (rigid_env && rigid_env[0] == '1') {
                 rt64_wr64_set_vertex_interp_rigid(1);
                 fprintf(stderr, "[WR64] experimental smooth-water interpolation enabled (env)\n");
+            }
+            // Motion blur (experimental prototype): env override, percent 0-90.
+            const char* mb_env = std::getenv("WR64_MOTIONBLUR");
+            if (mb_env && mb_env[0] != '\0') {
+                wr64_set_motion_blur_percent(std::atof(mb_env));
+                fprintf(stderr, "[WR64] motion blur (env): %s%%\n", mb_env);
             }
             // Overscan crop: env override (default on; launcher option rules).
             const char* ov_env = std::getenv("WR64_OVERSCAN");
