@@ -1094,3 +1094,13 @@ translate-Y% on offset sine phases. Sun: opacity pulse + tiny bob. Spray:
 opacity shimmer + sway. Clouds: slow drift. Birds: gull silhouettes in TWO
 wing poses (wr64_bg_birds_a/b.svg), crossfaded at ~2.6 Hz for a flap effect,
 gliding faster than the clouds behind them.
+
+Second pass (same day, user request): island + palm (static, behind the far
+wave so the surf laps at it), TWO DOLPHINS between far/mid waves doing a
+periodic jump (opacity+translate arc: rise/fade-in, dive/fade-out, rest
+underwater ~58% of a 7.5 s cycle), a JET SKI with rider racing rightward
+between mid/near waves (left% drift at 11%/s, mid-wave swell bob + fast chop
+bounce; two copies 1600 apart = seamless), a layered SUN AURA (wide radial
+glow + bright core), and a LENS FLARE layer above the water (anamorphic
+horizontal streak through the sun + ghost chain up the flare axis), whose
+opacity breathes on two superimposed sine periods (6 s + 17 s).

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="isl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3aa578"/><stop offset="70%" stop-color="#2e8f6e"/>
+      <stop offset="100%" stop-color="#d9c88f"/>
+    </linearGradient>
+  </defs>
+  <!-- island mound + sand rim -->
+  <path fill="url(#isl)" d="M120 612 Q170 560 250 556 Q340 552 400 592 Q430 606 440 614 L100 614 Q108 612 120 612 Z"/>
+  <path fill="#e8d8a8" opacity="0.9" d="M100 614 L440 614 Q442 620 430 622 L112 622 Q100 620 100 614 Z"/>
+  <!-- palm: curved trunk + fronds + coconuts -->
+  <path d="M258 560 Q252 512 272 470" fill="none" stroke="#8a5a35" stroke-width="9" stroke-linecap="round"/>
+  <g fill="none" stroke="#2f8f5e" stroke-width="7" stroke-linecap="round">
+    <path d="M272 470 Q308 452 344 462"/>
+    <path d="M272 470 Q302 440 336 434"/>
+    <path d="M272 470 Q268 434 288 410"/>
+    <path d="M272 470 Q240 438 208 434"/>
+    <path d="M272 470 Q236 456 202 466"/>
+    <path d="M272 470 Q252 442 224 420"/>
+  </g>
+  <circle cx="268" cy="474" r="6" fill="#6b4526"/>
+  <circle cx="280" cy="478" r="5" fill="#6b4526"/>
+</svg>

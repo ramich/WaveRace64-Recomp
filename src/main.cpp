@@ -88,6 +88,9 @@ public:
     recompui::Svg* clouds = nullptr;
     recompui::Svg* birds_a = nullptr;  // wings up }  crossfaded at ~2.6 Hz
     recompui::Svg* birds_b = nullptr;  // wings down } for the flap effect
+    recompui::Svg* dolphins = nullptr; // periodic jump arc between far/mid waves
+    recompui::Svg* jetski = nullptr;   // races along the mid wave, behind the near one
+    recompui::Svg* flare = nullptr;    // lens-flare ghosts + anamorphic streak
 
     WR64BackgroundAnimator(recompui::ResourceId rid, recompui::Element* parent)
         : recompui::Element(rid, parent, recompui::Events(recompui::EventType::Update), "div", false) {
@@ -124,9 +127,37 @@ protected:
             birds_a->set_opacity(flap);
             birds_b->set_opacity(1.0f - flap);
         }
+        // Dolphins: a periodic jump — they rise out of the water in an arc
+        // (fading in), then dive back (fading out) and rest underwater for
+        // the remainder of the cycle.
+        if (dolphins != nullptr) {
+            const float cycle = std::fmod(t, 7.5f) / 7.5f;   // 0..1
+            const float a = cycle / 0.42f;                   // jump = first 42%
+            if (a < 1.0f) {
+                const float arc = std::sin(a * 3.14159265f); // 0..1..0
+                dolphins->set_opacity(std::min(1.0f, arc * 2.2f));
+                dolphins->set_translate_2D(0.6f * a, -50.0f - 3.4f * arc, recompui::Unit::Percent);
+            } else {
+                dolphins->set_opacity(0.0f);
+            }
+        }
+        // Jet ski: races across (rightward, faster than everything else),
+        // with a quick chop-bounce on top of the mid wave's swell bob.
+        if (jetski != nullptr) {
+            jetski->set_left(-100.0f + std::fmod(t * 11.0f, 100.0f), recompui::Unit::Percent);
+            const float swell = 0.55f * std::sin(t * TWO_PI / 5.1f + 2.1f);   // match mid wave
+            const float chop = 0.22f * std::sin(t * TWO_PI / 0.9f);
+            jetski->set_translate_2D(0.0f, -50.0f + swell + chop, recompui::Unit::Percent);
+        }
         if (sun != nullptr) {
             sun->set_opacity(0.86f + 0.14f * std::sin(t * TWO_PI / 6.0f));
             sun->set_translate_2D(0.0f, -50.0f + 0.15f * std::sin(t * 0.7f), recompui::Unit::Percent);
+        }
+        // Lens flare: shimmer slightly out of phase with the sun pulse, with a
+        // slow second component so the ghosts "breathe" rather than strobe.
+        if (flare != nullptr) {
+            flare->set_opacity(0.55f + 0.25f * std::sin(t * TWO_PI / 6.0f + 0.9f)
+                                     + 0.20f * std::sin(t * TWO_PI / 17.0f));
         }
         if (spray != nullptr) {
             spray->set_opacity(0.70f + 0.30f * std::sin(t * 2.3f));
@@ -1028,10 +1059,14 @@ int main(int argc, char* argv[]) {
         anim->clouds  = make_layer("wr64_bg_clouds.svg", 200.0f);
         anim->birds_a = make_layer("wr64_bg_birds_a.svg", 200.0f);
         anim->birds_b = make_layer("wr64_bg_birds_b.svg", 200.0f);
-        anim->far_   = make_layer("wr64_bg_wave_far.svg", 200.0f);
-        anim->mid    = make_layer("wr64_bg_wave_mid.svg", 200.0f);
-        anim->near_  = make_layer("wr64_bg_wave_near.svg", 200.0f);
-        anim->spray  = make_layer("wr64_bg_spray.svg", 100.0f);
+        make_layer("wr64_bg_island.svg", 100.0f);  // static: the far wave laps at it
+        anim->far_    = make_layer("wr64_bg_wave_far.svg", 200.0f);
+        anim->dolphins = make_layer("wr64_bg_dolphins.svg", 100.0f);
+        anim->mid     = make_layer("wr64_bg_wave_mid.svg", 200.0f);
+        anim->jetski  = make_layer("wr64_bg_jetski.svg", 200.0f);
+        anim->near_   = make_layer("wr64_bg_wave_near.svg", 200.0f);
+        anim->spray   = make_layer("wr64_bg_spray.svg", 100.0f);
+        anim->flare   = make_layer("wr64_bg_flare.svg", 100.0f);  // above water: lens artifact
         make_layer("wr64_bg_vignette.svg", 100.0f);  // static, keeps text readable
 
         // Original wordmark logo (assets/wr64_logo.svg — a Pillow-rendered water
