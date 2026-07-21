@@ -63,6 +63,7 @@ extern "C" void rt64_wr64_set_vertex_interp_rigid(int enabled);
 extern "C" void rt64_wr64_set_overscan(float l, float r, float t, float b);
 extern "C" void rt64_wr64_set_split_remap(int enabled);
 extern "C" void rt64_wr64_set_motion_blur(float strength);
+extern "C" void rt64_wr64_set_sharpen(float strength);
 
 // Launcher hook (Enhancements -> Overscan Crop): crop the TV-overscan margins
 // (WR64 content rect (8,20)-(310,218) of 320x240) at present time with
@@ -84,6 +85,14 @@ extern "C" void wr64_set_motion_blur_percent(double percent) {
     if (percent < 0.0) percent = 0.0;
     if (percent > 90.0) percent = 90.0;
     rt64_wr64_set_motion_blur(float(percent / 100.0));
+}
+
+// Launcher hook (Enhancements -> Sharpening): contrast-adaptive sharpen at
+// the final present; percent 0-100 mapped to strength.
+extern "C" void wr64_set_sharpen_percent(double percent) {
+    if (percent < 0.0) percent = 0.0;
+    if (percent > 100.0) percent = 100.0;
+    rt64_wr64_set_sharpen(float(percent / 100.0));
 }
 extern "C" uint32_t rt64_wr64_split_half_draws();
 extern "C" float rt64_wr64_split_band_a0();
@@ -889,6 +898,12 @@ public:
                 wr64_set_motion_blur_percent(std::atof(mb_env));
                 fprintf(stderr, "[WR64] motion blur (env): %s%%\n", mb_env);
             }
+            // Sharpening: env override, percent 0-100.
+            const char* sh_env = std::getenv("WR64_SHARPEN");
+            if (sh_env && sh_env[0] != '\0') {
+                wr64_set_sharpen_percent(std::atof(sh_env));
+                fprintf(stderr, "[WR64] sharpening (env): %s%%\n", sh_env);
+            }
             // Overscan crop: env override (default on; launcher option rules).
             const char* ov_env = std::getenv("WR64_OVERSCAN");
             if (ov_env && ov_env[0] == '0') {
@@ -949,10 +964,20 @@ public:
 
     void enable_instant_present() override {
         if (!app_) return;
+        // Called by ultramodern on the FIRST game task (not earlier — with only
+        // the launcher on screen there are no VI-paced frames and PresentEarly
+        // starves presents, blacking out the window). WR64_INSTANT_PRESENT=0
+        // opts out in case of frame-pacing issues.
+        const char* ip_env = std::getenv("WR64_INSTANT_PRESENT");
+        if (ip_env && ip_env[0] == '0') {
+            fprintf(stderr, "[WR64-RT64] instant present disabled by env\n");
+            return;
+        }
         // Enable present-early mode for minimal latency (matches reference).
         app_->enhancementConfig.presentation.mode =
             RT64::EnhancementConfiguration::Presentation::Mode::PresentEarly;
         app_->updateEnhancementConfig();
+        fprintf(stderr, "[WR64-RT64] instant present enabled (WR64_INSTANT_PRESENT=0 to disable)\n");
     }
 
     void send_dl(const OSTask* task) override {
@@ -1649,6 +1674,7 @@ std::unique_ptr<ultramodern::renderer::RendererContext> create_render_context(
                 static_cast<int>(ctx->get_setup_result()));
         return nullptr;
     }
+
     return ctx;
 }
 

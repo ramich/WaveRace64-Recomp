@@ -134,6 +134,8 @@ process left behind.
 | `WR64_VTXINTERP_RIGID=1` | **Experimental** smooth-water: rigid-translation interpolation of the large wave meshes (also togglable in the launcher **Enhancements → Smooth Water**). Off by default — the wave motion can read wrong; see RE-NOTES "Wave-mesh interpolation" |
 | `WR64_OVERSCAN=0` | Disable the **Overscan Crop** (also togglable in the launcher **Enhancements** tab, default on): a GLideN64-style final-stage crop of the TV-overscan margins with scale-up, so gameplay fills the whole window (1P and 2P split-screen) with the 3D proportions fully compensated. See RE-NOTES "Overscan crop = full-window presentation" |
 | `WR64_MOTIONBLUR=<0-90>` | **Experimental** motion blur (also a launcher **Enhancements** slider, default off): present-time accumulation — each frame keeps a fading trail of the previous ones. Moving content trails; the launcher UI stays sharp. Prototype with known visual side effects; see RE-NOTES "Motion blur prototype" |
+| `WR64_SHARPEN=<0-100>` | Contrast-adaptive sharpening at the final present (also a launcher **Enhancements** slider, default off) — crispens the upscaled image without ringing halos |
+| `WR64_INSTANT_PRESENT=0` | Disable low-latency presentation (RT64 PresentEarly, **on by default**: frames present as soon as they're ready instead of waiting for the VI period — less input lag). Use only if you see frame-pacing issues |
 | `WR64_POKE_FOV=<factor>` | RE tooling: widen every camera-FOV-shaped value in RDRAM by `<factor>` (e.g. `1.3`, `2.0`). Diagnostic for the border/culling hunt — expect side effects (a second 45° camera-angle field flips the view at high factors). `WR64_POKE_FOV_ONLY=addr[,addr]` restricts to specific addresses; live-read addresses are logged |
 | `WR64_DEV=1` | Enable RT64 developer tooling: **F1** inspector (render stats, framebuffer views), F3 raw-RDRAM view, F4 texture replacements. (F2 flips RT64's ray-tracing flag but is non-functional — the RT pipeline is compiled out of modern RT64, see the key table below.) Debug keys are inert without this. |
 | `WR64_AUDIO_DUMP=1` | Dump the audio stream to `audio_dump.raw` for analysis (`scripts/analyze_audio_dump.py`) |
@@ -143,7 +145,12 @@ process left behind.
 Keyboard (defaults): WASD = stick, X = A, Z = B, LShift = Z, Return = START,
 arrows = D-pad, Q/E = L/R, IJKL = C-buttons, Esc = open settings menu (during
 gameplay; the settings menu has a quit option), F11 / Alt+Enter = fullscreen,
-F5 = toggle HD texture replacements (when a pack is loaded).
+F5 = toggle HD texture replacements (when a pack is loaded), F12 = save a
+screenshot of the presented frame to `screenshots/`.
+
+Command line: `--play` skips the launcher and boots straight into the game
+(handy for Steam or frontend integration). Crashes write a minidump to
+`crash_dumps/` (open with WinDbg/Visual Studio to see the faulting stack).
 **All bindings are remappable** in the launcher's Controls tab. Game controllers
 map automatically; the window title shows the measured FPS and the selected
 target framerate.

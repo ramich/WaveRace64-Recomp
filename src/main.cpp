@@ -10,6 +10,8 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
+#include <ctime>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -50,6 +52,8 @@ extern void wr64_set_fov_degrees(float deg);
 extern "C" void wr64_set_wave_interp(bool enabled);
 extern "C" void wr64_set_overscan_crop(bool enabled);
 extern "C" void wr64_set_motion_blur_percent(double percent);
+extern "C" void wr64_set_sharpen_percent(double percent);
+extern "C" void rt64_wr64_request_screenshot(const char* path);
 
 // FPS overlay configuration (set from the launcher Enhancements tab on the UI
 // thread, consumed by the overlay in update_gfx on the gfx thread).
@@ -58,6 +62,11 @@ static std::atomic<uint32_t> s_fps_pos{0};      // 0 TR, 1 TL, 2 BR, 3 BL
 static std::atomic<uint32_t> s_fps_color{0};    // index into wr64_fps_colors
 static std::atomic<uint32_t> s_fps_opacity{45}; // background opacity percent
 static std::atomic<uint32_t> s_fps_cfg_gen{1};
+
+// Set by --play on the command line: skip the launcher and boot the game
+// directly (Steam/frontend integration). Consumed by gfx_init_callback
+// (auto-start) and update_gfx (dismissing the raced launcher auto-show).
+static bool s_auto_play = false;
 
 // In-game toast staging (rendered top-center by update_gfx in its own
 // non-capturing context). Single message slot, callable from any thread.
@@ -292,9 +301,56 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 #include <SDL2/SDL.h>
 #ifdef _WIN32
 #include <SDL2/SDL_syswm.h>
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
 #endif
 
 #include "register_patches.h"
+
+#ifdef _WIN32
+// ---------------------------------------------------------------------------
+// Crash minidump handler. The known later-course crash is a 0xc0000005 at a
+// computed/garbage address (bad indirect call), so the Event Log record alone
+// can't name the recompiled caller — a minidump with stacks can. Dumps land in
+// crash_dumps/ next to the exe; open with WinDbg/VS ("!analyze -v" or just
+// look at the faulting thread's stack against the recompiled function names).
+// ---------------------------------------------------------------------------
+static LONG WINAPI wr64_crash_handler(EXCEPTION_POINTERS* info) {
+    CreateDirectoryA("crash_dumps", nullptr);
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    char path[MAX_PATH];
+    snprintf(path, sizeof(path), "crash_dumps\\WaveRace64-%04u%02u%02u-%02u%02u%02u.dmp",
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+
+    HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+        MINIDUMP_EXCEPTION_INFORMATION mei{};
+        mei.ThreadId = GetCurrentThreadId();
+        mei.ExceptionPointers = info;
+        mei.ClientPointers = FALSE;
+        // Stacks + memory referenced from stack/registers: enough to walk the
+        // recompiled call chain without a multi-GB full dump.
+        const MINIDUMP_TYPE type = (MINIDUMP_TYPE)(
+            MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory |
+            MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+                          type, &mei, nullptr, nullptr);
+        CloseHandle(file);
+        fprintf(stderr, "[WR64] CRASH: exception 0x%08lX at %p — minidump written to %s\n",
+                info->ExceptionRecord->ExceptionCode,
+                info->ExceptionRecord->ExceptionAddress, path);
+    } else {
+        fprintf(stderr, "[WR64] CRASH: exception 0x%08lX — failed to write minidump (%lu)\n",
+                info->ExceptionRecord->ExceptionCode, GetLastError());
+    }
+    fflush(stderr);
+    return EXCEPTION_CONTINUE_SEARCH;  // let Windows Error Reporting run too
+}
+#endif
 
 // Must be non-static so recompui can reference it for window-size queries.
 SDL_Window* window = nullptr;
@@ -416,6 +472,23 @@ static void update_gfx(void* /*gfx_data*/) {
         }
     }
 
+#ifdef HAS_RECOMPUI
+    // --play: RecompFrontend auto-shows the launcher whenever no context is
+    // shown and the game hasn't started yet — which races our deferred
+    // auto-start (the launcher can appear in the first frames and then sit on
+    // top of the running game). Once the game is up, dismiss it (once).
+    if (s_auto_play && ultramodern::is_game_started()) {
+        static bool launcher_dismissed = false;
+        if (!launcher_dismissed) {
+            recompui::ContextId launcher_ctx = recompui::get_launcher_context_id();
+            if (recompui::is_context_shown(launcher_ctx)) {
+                recompui::hide_context(launcher_ctx);
+            }
+            launcher_dismissed = true;
+        }
+    }
+#endif
+
     // F5: toggle original <-> replaced textures (global — all loaded packs).
     // Edge-detected from the SDL keyboard state so it works during gameplay
     // AND with the menu open. Runtime-only; it never touches the persisted
@@ -431,6 +504,24 @@ static void update_gfx(void* /*gfx_data*/) {
 #endif
         }
         f5_was_down = f5_down;
+
+        // F12: screenshot of the final presented frame (game + UI) to
+        // screenshots/WaveRace64-<timestamp>.png. The rt64 fork copies the
+        // swap chain on the next present and writes the PNG off-thread.
+        static bool f12_was_down = false;
+        const bool f12_down = keys[SDL_SCANCODE_F12] != 0;
+        if (f12_down && !f12_was_down) {
+            std::error_code ec;
+            std::filesystem::create_directories("screenshots", ec);
+            char shot_path[128];
+            SDL_snprintf(shot_path, sizeof(shot_path), "screenshots/WaveRace64-%u.png",
+                         (unsigned)std::time(nullptr));
+            rt64_wr64_request_screenshot(shot_path);
+#ifdef HAS_RECOMPUI
+            wr64_game_toast(std::string("Screenshot: ") + shot_path);
+#endif
+        }
+        f12_was_down = f12_down;
     }
 
 #ifdef HAS_RECOMPUI
@@ -635,21 +726,27 @@ static void vi_callback() {
 
 static void gfx_init_callback() {
 #ifndef HAS_RECOMPUI
-    // Without the launcher UI, auto-start the game after the VI thread has
-    // populated both ViState slots (set_dummy_vi runs at least once first).
-    std::thread([]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        std::u8string game_id = u8"waverace64";
-        if (recomp::is_rom_valid(game_id)) {
-            printf("[WR64] ROM validated, starting game...\n");
-            recomp::start_game(game_id);
-        } else {
-            fprintf(stderr, "[WR64] ERROR: ROM not valid at startup (check waverace64.z64 in CWD)\n");
-        }
-    }).detach();
+    const bool auto_start = true;
+#else
+    // With HAS_RECOMPUI the draw_hook shows the launcher automatically on the
+    // first frame when no context is shown and the game hasn't started —
+    // unless --play asked to go straight in.
+    const bool auto_start = s_auto_play;
 #endif
-    // With HAS_RECOMPUI: draw_hook shows the launcher automatically on the
-    // first frame when no context is shown and the game hasn't started.
+    if (auto_start) {
+        // Auto-start the game after the VI thread has populated both ViState
+        // slots (set_dummy_vi runs at least once first).
+        std::thread([]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            std::u8string game_id = u8"waverace64";
+            if (recomp::is_rom_valid(game_id)) {
+                printf("[WR64] ROM validated, starting game...\n");
+                recomp::start_game(game_id, {});
+            } else {
+                fprintf(stderr, "[WR64] ERROR: ROM not valid at startup (check waverace64.z64 in CWD)\n");
+            }
+        }).detach();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -736,10 +833,19 @@ static std::string get_game_thread_name(const OSThread* t) {
 // main()
 // ---------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(wr64_crash_handler);
+#endif
 
-    printf("[WR64] Wave Race 64 PC Recompilation v0.1.0\n");
+    // --play: skip the launcher and boot straight into the game (for Steam /
+    // frontend integration). Consumed by gfx_init_callback.
+    for (int i = 1; i < argc; i++) {
+        if (std::strcmp(argv[i], "--play") == 0) {
+            s_auto_play = true;
+        }
+    }
+
+    printf("[WR64] Wave Race 64 PC Recompilation v0.2.0-beta\n");
 
     // -----------------------------------------------------------------------
     // 1. Register overlay sections
@@ -928,6 +1034,11 @@ int main(int argc, char* argv[]) {
             "Experimental: the wave motion can look off — turn it off if the "
             "water seems wrong. Clouds and sprites are always smoothed.",
             false);
+        wr64_cfg.add_percent_number_option("sharpen", "Sharpening (0% = off)",
+            "Contrast-adaptive sharpening at the final present — crispens the "
+            "upscaled image without ringing halos. Applies live; the launcher "
+            "UI is unaffected.",
+            0.0);
         wr64_cfg.add_percent_number_option("motion_blur", "Motion Blur (experimental, 0% = off)",
             "Accumulation motion blur at the final present: each frame keeps a "
             "fading trail of the previous ones. At 0% the effect is fully "
@@ -983,6 +1094,7 @@ int main(int argc, char* argv[]) {
             wr64_set_wave_interp(std::get<bool>(cfg.get_option_value("wave_interp")));
             wr64_set_overscan_crop(std::get<bool>(cfg.get_option_value("overscan_crop")));
             wr64_set_motion_blur_percent(std::get<double>(cfg.get_option_value("motion_blur")));
+            wr64_set_sharpen_percent(std::get<double>(cfg.get_option_value("sharpen")));
 
             s_fps_show.store(std::get<bool>(cfg.get_option_value("fps_display")));
             s_fps_pos.store(std::get<uint32_t>(cfg.get_option_value("fps_position")));
