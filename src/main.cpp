@@ -45,6 +45,13 @@ extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
 extern void wr64_set_fov_degrees(float deg);
 extern "C" void wr64_set_wave_interp(bool enabled);
 extern "C" void wr64_set_overscan_crop(bool enabled);
+
+// FPS overlay configuration (set from the launcher Enhancements tab on the UI
+// thread, consumed by the overlay in update_gfx on the gfx thread).
+static std::atomic<bool>     s_fps_show{true};
+static std::atomic<uint32_t> s_fps_pos{0};    // 0 TR, 1 TL, 2 BR, 3 BL
+static std::atomic<uint32_t> s_fps_color{0};  // index into wr64_fps_colors
+static std::atomic<uint32_t> s_fps_cfg_gen{1};
 extern void wr64_set_texture_pack(const char* dir);
 extern void wr64_set_texture_replace(bool enabled);
 extern void wr64_set_texture_dump(bool enabled);
@@ -334,55 +341,98 @@ static void update_gfx(void* /*gfx_data*/) {
                                       : "   \xE2\x80\xA2   HD Textures: Off";
         char title[160];
         SDL_snprintf(title, sizeof(title),
-                     "Wave Race 64 - Recompiled   \xE2\x80\xA2   Target: %u FPS%s",
-                     target, texs);
+                     "Wave Race 64 - Recompiled   \xE2\x80\xA2   Target: %u FPS   "
+                     "\xE2\x80\xA2   Game: %.0f FPS%s",
+                     target, last_fps, texs);
         SDL_SetWindowTitle(window, title);
     }
 
 #ifdef HAS_RECOMPUI
-    // In-window FPS readout: a small always-on overlay label in the top-right
-    // corner of the game window, updated on the same 1s tick. Lives in its own
-    // recompui context with no focusable elements, so it never affects
-    // keyboard/controller navigation or game input.
+    // In-window FPS readout: a small always-on overlay pill, updated on the
+    // same 1s tick. Shows the presented (interpolated) rate plus the game's
+    // native rate in parentheses. Configurable in Enhancements (on/off,
+    // corner, color); the font is sized in raw pixels with a floor so it stays
+    // readable in small windows (the UI's dp scale would shrink it). Lives in
+    // its own recompui context that never captures input (a capturing shown
+    // context would disable all in-game input via recompinput).
     if (tick && last_fps > 0.0f) {
         static recompui::ContextId fps_ctx = {};
+        static bool fps_ctx_created = false;
+        static recompui::Element* fps_pill = nullptr;
         static recompui::Label* fps_label = nullptr;
         static bool fps_shown = false;
-        if (fps_label == nullptr) {
+        static uint32_t fps_applied_gen = 0;
+
+        if (!fps_ctx_created) {
             fps_ctx = recompui::create_context();
-            // The overlay must NEVER capture input: recompinput disables game
-            // input while any shown context captures it (that is how the
-            // settings menu takes over), and a capturing always-on overlay
-            // would kill in-game keyboard/controller input.
             fps_ctx.set_captures_input(false);
             fps_ctx.set_captures_mouse(false);
-            fps_ctx.open();
-            // Small translucent pill so the readout stays legible over bright
-            // sky/water.
-            recompui::Element* pill = fps_ctx.create_element<recompui::Element>(
-                fps_ctx.get_root_element());
-            pill->set_position(recompui::Position::Absolute);
-            pill->set_top(8.0f);
-            pill->set_right(14.0f);
-            pill->set_padding_top(2.0f);
-            pill->set_padding_bottom(2.0f);
-            pill->set_padding_left(10.0f);
-            pill->set_padding_right(10.0f);
-            pill->set_border_radius(10.0f);
-            pill->set_background_color(recompui::Color{ 0, 0, 0, 110 });
-            fps_label = fps_ctx.create_element<recompui::Label>(
-                pill, "", recompui::LabelStyle::Small);
-            fps_label->set_color(recompui::theme::color::Text);
-            fps_ctx.close();
+            fps_ctx_created = true;
         }
-        char fps_text[32];
-        SDL_snprintf(fps_text, sizeof(fps_text), "%.0f FPS", last_present_fps);
-        fps_ctx.open();
-        fps_label->set_text(fps_text);
-        fps_ctx.close();
-        if (!fps_shown) {
-            recompui::show_context(fps_ctx, "");
-            fps_shown = true;
+
+        const bool show = s_fps_show.load();
+        const uint32_t gen = s_fps_cfg_gen.load();
+        if (!show) {
+            if (fps_shown) {
+                recompui::hide_context(fps_ctx);
+                fps_shown = false;
+            }
+        } else {
+            fps_ctx.open();
+            if (gen != fps_applied_gen) {
+                fps_applied_gen = gen;
+                // Rebuild the pill with the current position/color config.
+                if (fps_pill != nullptr) {
+                    fps_ctx.get_root_element()->remove_child(fps_pill);
+                    fps_pill = nullptr;
+                    fps_label = nullptr;
+                }
+                fps_pill = fps_ctx.create_element<recompui::Element>(
+                    fps_ctx.get_root_element());
+                fps_pill->set_position(recompui::Position::Absolute);
+                const uint32_t pos = s_fps_pos.load();
+                if (pos == 0 || pos == 1) fps_pill->set_top(8.0f);
+                else                      fps_pill->set_bottom(8.0f);
+                if (pos == 0 || pos == 2) fps_pill->set_right(14.0f);
+                else                      fps_pill->set_left(14.0f);
+                fps_pill->set_padding_top(2.0f);
+                fps_pill->set_padding_bottom(2.0f);
+                fps_pill->set_padding_left(10.0f);
+                fps_pill->set_padding_right(10.0f);
+                fps_pill->set_border_radius(10.0f);
+                fps_pill->set_background_color(recompui::Color{ 0, 0, 0, 110 });
+                fps_label = fps_ctx.create_element<recompui::Label>(
+                    fps_pill, "", recompui::LabelStyle::Small);
+                static constexpr recompui::Color fps_colors[] = {
+                    { 255, 255, 255, 255 },  // white
+                    { 255, 220,  80, 255 },  // yellow
+                    { 130, 255, 130, 255 },  // green
+                    { 120, 230, 255, 255 },  // cyan
+                    { 255, 170,  60, 255 },  // orange
+                    { 255, 110, 110, 255 },  // red
+                };
+                uint32_t ci = s_fps_color.load();
+                if (ci >= SDL_arraysize(fps_colors)) ci = 0;
+                fps_label->set_color(fps_colors[ci]);
+            }
+
+            // Pixel-sized font with a floor so small windows stay readable.
+            int win_w = 0, win_h = 0;
+            if (window != nullptr) SDL_GetWindowSize(window, &win_w, &win_h);
+            float font_px = win_h * 0.022f;
+            if (font_px < 15.0f) font_px = 15.0f;
+            if (font_px > 30.0f) font_px = 30.0f;
+            fps_label->set_font_size(font_px, recompui::Unit::Px);
+
+            char fps_text[48];
+            SDL_snprintf(fps_text, sizeof(fps_text), "%.0f FPS (game %.0f)",
+                         last_present_fps, last_fps);
+            fps_label->set_text(fps_text);
+            fps_ctx.close();
+            if (!fps_shown) {
+                recompui::show_context(fps_ctx, "");
+                fps_shown = true;
+            }
         }
     }
 #endif
@@ -653,6 +703,29 @@ int main(int argc, char* argv[]) {
             "The 3D view keeps its proportions; the HUD gets the original TV "
             "framing (slightly larger).",
             true);
+        wr64_cfg.add_bool_option("fps_display", "FPS Display",
+            "Show a frame-rate readout in the corner of the game window: the "
+            "presented (interpolated) rate plus the game's native rate in "
+            "parentheses.",
+            true);
+        wr64_cfg.add_enum_option("fps_position", "FPS Position",
+            "Corner of the window for the FPS readout.",
+            {
+                {0u, "top_right",    "Top Right"},
+                {1u, "top_left",     "Top Left"},
+                {2u, "bottom_right", "Bottom Right"},
+                {3u, "bottom_left",  "Bottom Left"},
+            }, 0u);
+        wr64_cfg.add_enum_option("fps_color", "FPS Color",
+            "Text color of the FPS readout.",
+            {
+                {0u, "white",  "White"},
+                {1u, "yellow", "Yellow"},
+                {2u, "green",  "Green"},
+                {3u, "cyan",   "Cyan"},
+                {4u, "orange", "Orange"},
+                {5u, "red",    "Red"},
+            }, 0u);
         wr64_cfg.add_bool_option("wave_interp", "Smooth Water (experimental)",
             "Interpolate the wave mesh at high framerates so the water slides "
             "smoothly instead of stepping at the game's native 20 Hz. "
@@ -706,6 +779,11 @@ int main(int argc, char* argv[]) {
 
             wr64_set_wave_interp(std::get<bool>(cfg.get_option_value("wave_interp")));
             wr64_set_overscan_crop(std::get<bool>(cfg.get_option_value("overscan_crop")));
+
+            s_fps_show.store(std::get<bool>(cfg.get_option_value("fps_display")));
+            s_fps_pos.store(std::get<uint32_t>(cfg.get_option_value("fps_position")));
+            s_fps_color.store(std::get<uint32_t>(cfg.get_option_value("fps_color")));
+            s_fps_cfg_gen.fetch_add(1);
         };
         wr64_cfg.set_load_callback(apply_wr64);
         wr64_cfg.set_save_callback(apply_wr64);
