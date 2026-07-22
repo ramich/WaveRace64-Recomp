@@ -298,9 +298,9 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 // ---------------------------------------------------------------------------
 // SDL2 window / gfx callbacks
 // ---------------------------------------------------------------------------
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #ifdef _WIN32
-#include <SDL2/SDL_syswm.h>
+#include <SDL_syswm.h>
 #include <windows.h>
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")

@@ -13,7 +13,7 @@
 #include <cstring>
 #include <atomic>
 #include <mutex>
-#include <SDL2/SDL.h>
+#include <SDL.h>
 
 namespace wr64 {
 

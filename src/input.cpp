@@ -27,7 +27,7 @@
 
 #include <cstdio>
 #include <cmath>
-#include <SDL2/SDL.h>
+#include <SDL.h>
 
 #ifdef HAS_RECOMPUI
 // With the RecompFrontend launcher present, input flows through recompinput so

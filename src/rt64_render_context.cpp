@@ -31,7 +31,7 @@
 
 #include "librecomp/mods.hpp"
 
-#include <SDL2/SDL_events.h>
+#include <SDL_events.h>
 
 #include "ultramodern/renderer_context.hpp"
 #include "ultramodern/config.hpp"
