@@ -1107,3 +1107,74 @@ bounce; two copies 1600 apart = seamless), a layered SUN AURA (wide radial
 glow + bright core), and a LENS FLARE layer above the water (anamorphic
 horizontal streak through the sun + ghost chain up the flare axis), whose
 opacity breathes on two superimposed sine periods (6 s + 17 s).
+
+## CI release build — toolchain reality (2026-07-21)
+
+Notes on building this project from a clean checkout in CI (the release
+workflow itself lives outside this repo). Getting a green build surfaced a
+stack of local-vs-CI gaps and a runner regression — all worth not
+rediscovering:
+
+- **Three inputs the public repo does NOT commit, regenerated in CI:**
+  RecompiledFuncs/ + rsp/aspMain.cpp (from N64Recomp/RSPRecomp over the ROM),
+  and **patches/syms.ld** (gitignored; `scripts/generate_syms_ld.py` from the
+  syms TOML — the patches Makefile depends on it but has no rule to make it).
+  NB local dev only regenerates syms.ld when the script is run by hand; if the
+  syms TOML changes, rerun it (rebuild.cmd does NOT).
+- **N64RecompCLI** is the exe target (produces N64Recomp.exe); plain
+  `N64Recomp` is the library — building the wrong one "succeeds" without
+  emitting the exe.
+- **THE RUNNER REGRESSION (root cause of two failures):** `windows-latest`
+  moved to VS 18 / Clang 20. (a) MSVC STL asserts "expected Clang 20 or newer"
+  (STL1000) — portable LLVM 19.1.3 clang-cl fails it. (b) Clang 20 rejects
+  SDL 2.26.3's hand-rolled `_m_prefetch` shim ("definition of builtin
+  function"). Verified across Zelda64 / Banjo / Trouble-Makers: ALL bundle
+  SDL 2.26.3 (upstream rt64 still does, even our 2026-05 base; TM's pinned rt64
+  23cab603 is ~9 months OLDER than ours, same SDL) and all built on older
+  Clang < 20 images — nobody avoids `_m_prefetch` by config; their green builds
+  are historical. FIX = pin `runs-on: windows-2022` (VS 2022, Clang ≤ 19):
+  tolerates the SDL shim AND the runner's VS clang matches its own STL. Bonus:
+  freezes the toolchain for reproducibility.
+- **Compiler split (now unanimous across all reference recomps):** main build
+  uses the runner's VS-bundled clang-cl (found via `vswhere -find
+  VC\Tools\Llvm\x64\bin\clang-cl.exe`); portable LLVM 19.1.3 clang + ld.lld
+  only for the MIPS patches (their GCC-style flags need it). Added
+  `-Xclang -fexceptions -Xclang -fcxx-exceptions` (Zelda + Banjo both pass it;
+  recompui/RmlUi use exceptions) and `-DCMAKE_MT=mt` (portable llvm-mt lacks
+  libxml2, dies "no libxml2" at exe-link manifest embed).
+- **CI caught real missing-committed sources:** patches/ui_funcs.h +
+  patch_helpers.h + recompui_event_structs.h were untracked (present locally,
+  never committed) — a fresh clone couldn't build. Committed (see below).
+- Package from BUILD OUTPUT (CMake stages SDL2/dxil/dxcompiler + assets next to
+  the exe via POST_BUILD) + MSVC runtime from System32. Zip name carries a UTC
+  timestamp + short source SHA, with a .sha256 sidecar.
+- YAML trap: no column-0 PowerShell here-string (`@"`/`"@`) inside a `run:`
+  block — it breaks the workflow parse; use a PS array instead.
+
+## recompui bridge headers (patches/{ui_funcs,patch_helpers,recompui_event_structs}.h)
+
+The game↔frontend UI contract, hand-written, game-specific (so they live in the
+game repo's patches/, not in generic RecompFrontend). recompui reaches into them
+via `#include "../../../../../patches/ui_funcs.h"`.
+
+- **patch_helpers.h** — the dual-ABI glue. `DECLARE_FUNC(type, name, ...)`
+  expands differently per side: under `MIPS` (patch code → N64 elf) it's a
+  normal `extern "C" type name(args)`; on the native side EVERY recompiled
+  function has the uniform recompiler signature `void name(uint8_t* rdram,
+  recomp_context* ctx)`. Lets one declaration mean the right thing to both
+  compilers. Standard N64Recomp pattern (Zelda/Banjo have the same helper).
+- **recompui_event_structs.h** — shared UI event vocabulary (RecompuiEventType
+  click/focus/hover/drag/menu-action…, RecompuiMenuAction, the RecompuiEventData
+  tagged union). Both sides need identical layout to pass events across.
+- **ui_funcs.h** — includes the two above and declares the bridge entry point
+  `recomp_run_ui_callbacks` via DECLARE_FUNC. recompui itself DEFINES that
+  function (ui_api_events.cpp), and #includes the host's ui_funcs.h to get the
+  matching declaration + the shared event-struct/patch_helpers vocabulary.
+  So these headers are a host-provided CONTRACT that recompui hardcodes an
+  include of (`../../../../../patches/ui_funcs.h`) — NOT game-side
+  implementations. WR64 implements no custom game-side UI callbacks
+  (patches/placeholder.c is empty); the port drives the launcher natively
+  from main.cpp. This host-supplies-the-contract coupling is a Zelda64Recomp
+  template convention, inherited via RecompFrontend — every host repo must
+  ship these small headers, and recompui_event_structs.h must stay in sync
+  with recompui's own ui_types.h enums (there's a comment there saying so).

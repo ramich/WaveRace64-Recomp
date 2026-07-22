@@ -303,14 +303,9 @@ A release archive therefore contains only: the executable, its runtime DLLs
 `assets/` (launcher art, fonts, controller database). No ROM, no game assets.
 
 **Building still requires the ROM.** The recompiler must read it to generate the
-C, so any build machine — including a CI runner that produces release binaries —
-needs the ROM. The standard approach for automated release builds is to keep the
-ROM in a **private repository** and have the build job check it out with a
-scoped token (never committing it to the public repo and never attaching it to
-the release). WR64's symbols (`recomp/waverace64.us.rev1.syms.toml`) are already
-public and committed, so the ROM is the only private input required. A GitHub
-Actions release workflow along these lines is planned (Phase 8) but not yet
-added.
+C, so any build machine needs the ROM. WR64's symbols
+(`recomp/waverace64.us.rev1.syms.toml`) are already public and committed, so the
+ROM is the only private input required.
 
 ## Project Structure
 
