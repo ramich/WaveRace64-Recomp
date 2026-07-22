@@ -1,0 +1,19 @@
+# MacPorts setup for the macOS CI build (melusina-org/setup-macports).
+# Provides the MIPS-patches toolchain (clang-18 / llvm-18 → clang-mp-18,
+# ld.lld-mp-18, llvm-ar-mp-18) plus SDL2 + freetype for the host build.
+# arm64-only (Apple Silicon), so the libs are native — no "select: universal"
+# (that is only needed for a universal x86_64+arm64 binary). Modeled on
+# BanjoRecomp/.github/macos/macports.yaml.
+version: '2.10.6'
+prefix: '/opt/local'
+variants:
+  select:
+    - aqua
+    - metal
+  deselect: x11
+ports:
+  - name: libiconv
+  - name: libsdl2
+  - name: freetype
+  - name: clang-18
+  - name: llvm-18
