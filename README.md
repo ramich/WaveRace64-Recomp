@@ -73,8 +73,11 @@ process left behind.
   RecompFrontend forks) with Original 1×–9× choices (240p → 2160p/4K) plus
   Auto; MSAA, framerate and fullscreen as before; **controls are fully
   rebindable** (the port routes input through recompinput, so the Controls tab
-  actually takes effect). A game-specific **Enhancements** tab exposes the
-  **Overscan Crop** (full-window presentation, default on), camera FOV with a
+  actually takes effect). The Graphics **Aspect Ratio** setting is honored
+  live (Expand = widescreen, Original = 4:3) and composes with a 3-way
+  **Border Area** mode. A game-specific **Enhancements** tab exposes the
+  **Border Area** dropdown (Original black borders / Overscan Crop
+  full-window default / Extended experimental), camera FOV with a
   real **Reset to 45°** action button, wave-grid size, an **Unlock** button
   (marks every difficulty complete in the EEPROM save — keeps a
   `.unlock_backup` — applied on next game start), a configurable **FPS
@@ -132,7 +135,8 @@ process left behind.
 | `WR64_HIGHFPS=1` | Experimental: present at display refresh rate with RT64 transform interpolation between the game's native 20 Hz frames. The former **cloud stutter** artifact is fixed (see `WR64_VTXINTERP` below). See `docs/RE-NOTES.md` |
 | `WR64_VTXINTERP=N` | Per-vertex interpolation for small CPU-animated meshes at high FPS — this is what makes the **drifting clouds smooth** instead of snapping at 20 Hz. The value is a max-vertex-count threshold per transform: default **64** (unset or `1`), `0` disables. The threshold keeps the camera-anchored wave mesh (350–870 verts) on its original snapped animation — interpolating it warps the water. `WR64_VTXINTERP_DEBUG=1` logs per-transform velocity stats. See RE-NOTES "Cloud stutter — SOLVED" |
 | `WR64_VTXINTERP_RIGID=1` | **Experimental** smooth-water: rigid-translation interpolation of the large wave meshes (also togglable in the launcher **Enhancements → Smooth Water**). Off by default — the wave motion can read wrong; see RE-NOTES "Wave-mesh interpolation" |
-| `WR64_OVERSCAN=0` | Disable the **Overscan Crop** (also togglable in the launcher **Enhancements** tab, default on): a GLideN64-style final-stage crop of the TV-overscan margins with scale-up, so gameplay fills the whole window (1P and 2P split-screen) with the 3D proportions fully compensated. See RE-NOTES "Overscan crop = full-window presentation" |
+| `WR64_OVERSCAN=<0/1/2>` | **Border Area** mode (also a launcher **Enhancements** dropdown, independent of the Graphics **Aspect Ratio** setting): `1` (default) = **Overscan Crop**, a GLideN64-style final-stage crop of the TV-overscan margins with scale-up, so gameplay fills the whole window (1P and 2P split-screen) with the 3D proportions fully compensated; `0` = **Original black borders** (Expand: wide world with original-scale top/bottom bars and black side bars over the expansion-edge artifact zone; 4:3: the native bordered frame); `2` = **Extended** (experimental, raw uncropped frame). See RE-NOTES "Border Area modes" |
+| `WR64_FRAME_SIDES=<pct>` | Width of the black side bars per side in Border Area = Original + Expand (default `6`; they are wider than the real border columns on purpose, to cover the world-expansion edge artifacts) |
 | `WR64_MOTIONBLUR=<0-90>` | **Experimental** motion blur (also a launcher **Enhancements** slider, default off): present-time accumulation — each frame keeps a fading trail of the previous ones. Moving content trails; the launcher UI stays sharp. Prototype with known visual side effects; see RE-NOTES "Motion blur prototype" |
 | `WR64_SHARPEN=<0-100>` | Contrast-adaptive sharpening at the final present (also a launcher **Enhancements** slider, default off) — crispens the upscaled image without ringing halos |
 | `WR64_INSTANT_PRESENT=0` | Disable low-latency presentation (RT64 PresentEarly, **on by default**: frames present as soon as they're ready instead of waiting for the VI period — less input lag). Use only if you see frame-pacing issues |

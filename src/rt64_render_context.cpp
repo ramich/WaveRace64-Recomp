@@ -61,16 +61,41 @@ extern "C" void rt64_wr64_set_wide_world(int enabled);
 extern "C" void rt64_wr64_set_vertex_interp(int enabled);
 extern "C" void rt64_wr64_set_vertex_interp_rigid(int enabled);
 extern "C" void rt64_wr64_set_overscan(float l, float r, float t, float b);
+extern "C" void rt64_wr64_set_crop43_mode(int mode);
+extern "C" void rt64_wr64_set_frame_sides(float frac);
 extern "C" void rt64_wr64_set_split_remap(int enabled);
 extern "C" void rt64_wr64_set_motion_blur(float strength);
 extern "C" void rt64_wr64_set_sharpen(float strength);
 
-// Launcher hook (Enhancements -> Overscan Crop): crop the TV-overscan margins
-// (WR64 content rect (8,20)-(310,218) of 320x240) at present time with
-// scale-up, so gameplay fills the window vertically and the junk rows vanish.
-static std::atomic<bool> s_overscan_enabled{true};
-extern "C" void wr64_set_overscan_crop(bool enabled) {
-    s_overscan_enabled.store(enabled);
+// Launcher hook (Enhancements -> Border Area): how the TV-overscan border
+// band (outside the content rect (8,20)-(310,218) of 320x240) is handled
+// during gameplay. Orthogonal to the Graphics Aspect Ratio setting.
+//   0 = Original:  show the game's black borders (top/bottom bands in Expand;
+//                  the full native frame in 4:3).
+//   1 = Overscan:  crop the margins at present time with scale-up so the
+//                  content fills the window/box — the default, like a real TV.
+//   2 = Extended:  experimental — no crop, the full frame including the edge
+//                  strip is shown (Expand only; falls back to Original in 4:3).
+static std::atomic<uint32_t> s_border_mode{1};
+extern "C" void wr64_set_border_mode(uint32_t mode) {
+    s_border_mode.store(mode <= 2 ? mode : 1);
+}
+
+// Launcher Graphics tab -> Aspect Ratio. This is respected at runtime and is
+// INDEPENDENT of the Overscan Crop above (all four combinations are valid):
+//   - Expand   -> widescreen: the game rectangle fills the window width; the
+//                 world-widening hooks below run so real content (not stretch)
+//                 fills the margins.
+//   - Original -> 4:3: the widening hooks are disabled and the final blit is
+//                 pillarboxed (crop43) to 4:3, showing the game's native frame.
+// RT64's own aspectRatio stays Expand permanently (never flipped at runtime —
+// a UserConfiguration flip crashes in-flight queues / ghosts stale targets);
+// the 4:3 look is produced purely by the present-time crop43 pillarbox.
+// s_want_43 caches the current selection; update_config() refreshes it live.
+static std::atomic<bool> s_want_43{false};
+static bool wr64_compute_want_43() {
+    return ultramodern::renderer::get_graphics_config().ar_option
+        == ultramodern::renderer::AspectRatio::Original;
 }
 
 // Launcher hook (Enhancements -> Smooth Water, experimental): rigid-translation
@@ -791,6 +816,12 @@ public:
             app_->userConfig.aspectRatio = RT64::UserConfiguration::AspectRatio::Original;
         }
 
+        // Seed the runtime 4:3-vs-widescreen selection from the saved Graphics
+        // Aspect Ratio (Original -> 4:3 pillarbox; Expand -> widescreen). This
+        // is applied per-frame via crop43 + the widening hooks, independently
+        // of the Overscan Crop; update_config() keeps it in sync live.
+        s_want_43.store(wr64_compute_want_43());
+
         // WR64_HIGHFPS=1 forces display-rate presentation even if the launcher
         // config is set to Original (backwards-compat env var override).
         const char* highfps_env = std::getenv("WR64_HIGHFPS");
@@ -904,11 +935,13 @@ public:
                 wr64_set_sharpen_percent(std::atof(sh_env));
                 fprintf(stderr, "[WR64] sharpening (env): %s%%\n", sh_env);
             }
-            // Overscan crop: env override (default on; launcher option rules).
+            // Border Area mode: env override (launcher option rules otherwise).
+            // WR64_OVERSCAN: 0 = Original black borders, 1 = Overscan crop
+            // (default), 2 = Extended (experimental).
             const char* ov_env = std::getenv("WR64_OVERSCAN");
-            if (ov_env && ov_env[0] == '0') {
-                s_overscan_enabled.store(false);
-                fprintf(stderr, "[WR64] overscan crop disabled (env)\n");
+            if (ov_env && (ov_env[0] == '0' || ov_env[0] == '2')) {
+                s_border_mode.store(ov_env[0] - '0');
+                fprintf(stderr, "[WR64] border mode (env): %c\n", ov_env[0]);
             }
         }
 
@@ -949,6 +982,11 @@ public:
         app_->userConfig.aspectRatio = (widescreen && !s_show_borders)
             ? RT64::UserConfiguration::AspectRatio::Expand
             : RT64::UserConfiguration::AspectRatio::Original;
+
+        // Refresh the runtime 4:3-vs-widescreen selection from the (possibly
+        // just-changed) Graphics Aspect Ratio. Applied live via crop43 + the
+        // widening hooks in send_dl; independent of the Overscan Crop toggle.
+        s_want_43.store(new_config.ar_option == ultramodern::renderer::AspectRatio::Original);
 
         bool res_changed  = new_config.res_option  != old_config.res_option;
         bool ar_changed   = new_config.ar_option   != old_config.ar_option;
@@ -1102,7 +1140,35 @@ public:
                     static const char* sa_env = std::getenv("WR64_SCENE_ASPECT");
                     const bool widescreen_enabled = !(ws_env2 && ws_env2[0] == '0');
                     const bool scene_aspect_enabled = !(sa_env && sa_env[0] == '0');
-                    const int wanted = is_gameplay ? 1 : 0;
+                    // Gameplay presents wide (Expand, crop43 off) when the
+                    // Graphics Aspect Ratio is Expand; when it is Original,
+                    // gameplay pillarboxes to 4:3 like a menu (crop43 on),
+                    // showing the game's native frame with its black borders.
+                    // This is INDEPENDENT of the Overscan Crop — overscan only
+                    // refines the widescreen fill (below), it no longer forces
+                    // the aspect. Menus always pillarbox (is_gameplay false).
+                    // Gameplay presents wide whenever the aspect is Expand —
+                    // the Border Area setting never changes the aspect, it only
+                    // picks how the border band is presented (black bars, crop,
+                    // or raw frame).
+                    const uint32_t bm = s_border_mode.load();
+                    const int wanted = (is_gameplay && !s_want_43.load()) ? 1 : 0;
+                    // The crop43 sub-mode follows the Border Area setting for
+                    // 4:3 gameplay and menus alike: Original -> borders inset
+                    // (native frame with its black borders), Overscan ->
+                    // content-zoom (the content rect fills the 4:3 box, no
+                    // bars), Extended -> borders inset for 4:3 gameplay
+                    // (nothing to extend) / menu overscan zoom + garbage-row
+                    // clamp. Harmless when crop43 itself is off (wide gameplay).
+                    int crop43_mode = 0;
+                    if (bm == 0) {
+                        crop43_mode = 1;
+                    } else if (bm == 1) {
+                        crop43_mode = 2;
+                    } else if (is_gameplay && s_want_43.load()) {
+                        crop43_mode = 1;
+                    }
+                    rt64_wr64_set_crop43_mode(crop43_mode);
                     if (widescreen_enabled && scene_aspect_enabled && wanted != s_crop_requested) {
                         s_crop_requested = wanted;
                         // Presentation-level pillarbox: rendering stays wide
@@ -1127,36 +1193,60 @@ public:
                     const uint32_t split_draws = rt64_wr64_split_half_draws();
                     const bool split_active = (split_draws != s_last_split_draws);
                     s_last_split_draws = split_draws;
+                    const uint32_t border_mode = s_border_mode.load();
+                    // Side-bar width for Border Area = Original in Expand:
+                    // fraction of the presented width blacked out per side.
+                    // Wider than the original border columns on purpose — the
+                    // extreme margins of the world expansion carry artifacts
+                    // (blurry seams / stale bands) that the bars must cover.
+                    // WR64_FRAME_SIDES=<percent> overrides (default 6).
+                    static const float frame_side_frac = []() {
+                        const char* fs = std::getenv("WR64_FRAME_SIDES");
+                        const double pct = fs ? atof(fs) : 6.0;
+                        return (float)((pct > 0.0 && pct < 45.0 ? pct : 6.0) / 100.0);
+                    }();
                     if (split_active) {
                         rt64_wr64_set_split_bands(
                             rt64_wr64_split_band_a0(), rt64_wr64_split_band_a1(),
                             rt64_wr64_split_band_b0(), rt64_wr64_split_band_b1());
+                        rt64_wr64_set_frame_sides(0.0f);
+                    } else if (is_gameplay && !s_want_43.load() && border_mode == 0) {
+                        // Border Area = Original in Expand: the world stays
+                        // wide; blit only the content rows (20..218 of 240) at
+                        // their original vertical placement (original
+                        // top/bottom black bars) and black out the side margins
+                        // where the expansion's edge artifacts live.
+                        rt64_wr64_set_split_bands(20.0f / 240.0f, 218.0f / 240.0f, 0.0f, 0.0f);
+                        rt64_wr64_set_frame_sides(frame_side_frac);
                     } else {
                         rt64_wr64_set_split_bands(0.0f, 1.0f, 0.0f, 0.0f);
+                        rt64_wr64_set_frame_sides(0.0f);
                     }
 
-                    // Overscan crop (GLideN64-style, launcher Enhancements ->
-                    // Overscan Crop): during plain widescreen gameplay, crop
-                    // the vertical TV-overscan margins (content rows 20..218 of
-                    // 240) at present time WITH scale-up — the top junk rows
-                    // and the VI border bands vanish and the game fills the
-                    // window vertically. The projection processor compensates
-                    // the 3D vertical FOV so the world keeps its proportions
-                    // and coverage. Menus (crop43) and 2P split-screen keep the
-                    // plain present. Horizontal stays 0: border removal already
-                    // fills the width with real content.
-                    rt64_wr64_set_split_remap((split_active && s_overscan_enabled.load()) ? 1 : 0);
-                    if (split_active && s_overscan_enabled.load()) {
+                    // Overscan crop (GLideN64-style, Border Area = Overscan):
+                    // during plain widescreen gameplay, crop the TV-overscan
+                    // margins (content rect (8,20)-(310,218)) at present time
+                    // WITH scale-up — the top junk rows and the VI border bands
+                    // vanish and the game fills the whole window. The
+                    // projection processor compensates the 3D FOV so the world
+                    // keeps its proportions and coverage. Menus (crop43) and
+                    // the other border modes keep the plain present; 2P
+                    // split-screen gets the band remap instead.
+                    rt64_wr64_set_split_remap((split_active && border_mode == 1) ? 1 : 0);
+                    if (split_active && border_mode == 1) {
                         // 2P split-screen: the two-band present remaps each
                         // half's content band to fill its half of the window
                         // (vertical crop handled there); here only the side
                         // insets are cropped (2P content rect x = 8..311).
                         rt64_wr64_set_overscan(8.0f / 320.0f, 9.0f / 320.0f, 0.0f, 0.0f);
-                    } else if (!split_active && is_gameplay && s_overscan_enabled.load()) {
+                    } else if (!split_active && is_gameplay && border_mode == 1
+                               && !s_want_43.load()) {
                         // The game's content rect is (8,20)-(310,218) of
                         // 320x240 — crop the overscan margins on all four
                         // edges (the logical VI space stays 320x240 even in
                         // Expand, so these fractions hold in widescreen).
+                        // Only in Expand (widescreen) mode: the 4:3 flavor of
+                        // this crop is handled inside crop43 (sub-mode 2).
                         rt64_wr64_set_overscan(8.0f / 320.0f, 10.0f / 320.0f,
                                                20.0f / 240.0f, 22.0f / 240.0f);
                     } else {
@@ -1201,7 +1291,14 @@ public:
                     // is active. In borders-on (stock) mode all widening is off
                     // so the game presents its native frame with its own black
                     // borders; menus in either mode get no widening.
-                    const bool widen = border_removal && is_gameplay;
+                    // Widen only during gameplay with border removal AND the
+                    // Graphics Aspect Ratio set to Expand — the Border Area
+                    // setting does not affect this (in Original-borders mode
+                    // the wide world simply presents with black bars over the
+                    // border band). With Aspect = Original the native frame is
+                    // pillarboxed (crop43 above) and all widescreen-expand
+                    // hooks stay off.
+                    const bool widen = border_removal && is_gameplay && !s_want_43.load();
                     rt64_wr64_set_scissor_widen(widen ? 1 : 0);
                     rt64_wr64_set_viewport_widen(widen ? 1 : 0);
                     // Wave-grid enlargement: the detail-water mesh is built
@@ -1218,7 +1315,11 @@ public:
                     if (widen) {
                         wr32g(rdram, 0x800DA8B8u, s_wavegrid_rows);
                         wr32g(rdram, 0x800DA8BCu, s_wavegrid_cols);
-                    } else if (!border_removal && is_gameplay) {
+                    } else if (is_gameplay) {
+                        // Not widening (stock mode, or overscan off → 4:3
+                        // pillarbox): restore the stock grid so the enlarged
+                        // values don't persist past a live toggle and so the
+                        // detailed water doesn't extend beyond the 4:3 view.
                         wr32g(rdram, 0x800DA8B8u, 19u);
                         wr32g(rdram, 0x800DA8BCu, 35u);
                     }
@@ -1236,8 +1337,14 @@ public:
                     }
                 }
 
+                // DL rewrite (tint + inner-rect scissor widening) only when
+                // actually widening — same rule as the widen hooks above
+                // (aspect = Expand). Otherwise we leave the game's DL
+                // untouched so it draws its original content + black borders,
+                // which the 4:3 pillarbox presents.
                 uint32_t addr = dl_start_phys;
-                for (int i = 0; border_removal && is_gameplay && i < 0x4000 && addr < 0x7FFFF8u; i++, addr += 8) {
+                const bool dl_widen = border_removal && is_gameplay && !s_want_43.load();
+                for (int i = 0; dl_widen && i < 0x4000 && addr < 0x7FFFF8u; i++, addr += 8) {
                     uint32_t w0 = *(uint32_t*)(rdram + addr);
                     uint8_t op = w0 >> 24;
                     if (op == 0xB8) { // G_ENDDL (F3DEX)
@@ -1365,7 +1472,10 @@ public:
             rt64_wr64_set_viewport_widen(0);
             rt64_wr64_set_wide_world(0);
             rt64_wr64_set_present_crop43(0);
+            rt64_wr64_set_crop43_mode(0);
             rt64_wr64_set_overscan(0.0f, 0.0f, 0.0f, 0.0f);
+            rt64_wr64_set_split_bands(0.0f, 1.0f, 0.0f, 0.0f);
+            rt64_wr64_set_frame_sides(0.0f);
             s_crop_requested = -1;
             wr32g(app_->core.RDRAM, 0x800DA8B8u, 19u);
             wr32g(app_->core.RDRAM, 0x800DA8BCu, 35u);

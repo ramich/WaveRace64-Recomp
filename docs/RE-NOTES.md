@@ -1048,6 +1048,59 @@ launched it (pre-existing set_tab quirk — affects Settings + Mods entries);
 (3) launcher list: the first keypress only FOCUSES the list, so keyboard
 automation needs Enter x2 to start the game.
 
+## Border Area modes + Aspect Ratio decoupling (2026-07-22)
+
+The Overscan Crop bool became a 3-way "Border Area" enum (Enhancements tab),
+ORTHOGONAL to the Graphics Aspect Ratio setting, which previously was a
+silent no-op (WR64 permanently forced Expand). Design iterated through four
+user-tested attempts — record the landing point, the wrong turns cost hours:
+
+- Graphics -> Aspect Ratio is now REAL and applies live (s_want_43, seeded
+  in the ctor, refreshed in update_config). RT64's UserConfiguration STILL
+  never flips at runtime (crash/ghosting, see the per-scene presentation
+  section) — Original aspect is produced purely by the crop43 present
+  pillarbox during gameplay too, exactly like menus.
+- Border Area (s_border_mode, WR64_OVERSCAN=0/1/2) picks how the border
+  band presents. It NEVER changes the aspect (user was explicit):
+  0 Original = black borders. Expand: world stays WIDE (all widening hooks
+    unchanged), present = split-band blit rows 20..218 (original-scale
+    top/bottom bars) + rt64_wr64_set_frame_sides(frac) black side bars,
+    default 6%/side (WR64_FRAME_SIDES=<pct>), deliberately wider than the
+    real border columns to cover the expansion-edge artifact zone (see
+    below). 4:3: crop43 sub-mode 1 = scissor to the content rect on ALL
+    FOUR sides.
+  1 Overscan = the 07-21 crop (default, unchanged in Expand incl. 2P
+    remap). 4:3: crop43 sub-mode 2 = affine viewport remap, content rect
+    exactly fills the 4:3 box.
+  2 Extended = experimental raw frame (no crop) in Expand; falls back to
+    borders in 4:3.
+- Menus follow the setting too: Original -> bordered frame (sub-mode 1),
+  Overscan -> content-zoom (sub-mode 2, box filled, no bars), Extended ->
+  the legacy 1.08 zoom, which now has a post-zoom vertical clamp to the
+  content rows (the zoom hides the SIDE band entirely but only ~4% of the
+  ~8-9% tall band — the rest flickered in player select).
+
+KEY PHYSICAL FACT (root cause of two "flickering border" reports): the
+border band of the framebuffer is NOT black — it is uncleared RDRAM that a
+CRT's overscan hid (the known top-rows-0-19 garbage strip is just its top
+edge; the side columns 0..8/310..320 are the same). Any mode that shows the
+band region must SCISSOR it to swapchain black, never display it. Attract
+mode can look stably black there by luck; racing churns that memory visibly.
+
+Artifact zone (why Original-mode side bars are wide): the border-removal
+expansion fills margins with water/sky/tint reliably, but course-world
+geometry is gated by the 18-sector PVS (no clip constant to widen — see the
+course-world section) and object culling doesn't follow, so the outermost
+margins carry blurry seams/stale bands/pop-in. Self-inflicted by the
+expansion; the honest presentation is bars over that zone (or Overscan's
+crop). Real fixes remain the open neighbor-sector-DL and buoy-cull
+experiments.
+
+rt64 hooks (fork e483d77): rt64_wr64_set_crop43_mode(0 menu zoom+clamp /
+1 borders inset / 2 content zoom) replacing the old bool, and
+rt64_wr64_set_frame_sides(frac). Port: crop43 wanted + widen/dl_widen now
+gate on s_want_43 (aspect), not the border mode.
+
 ## Motion blur prototype (2026-07-21 pm) — EXPERIMENTAL
 
 Enhancements -> "Motion Blur (experimental)", percent slider (0 = off,

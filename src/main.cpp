@@ -50,7 +50,7 @@ extern void wr64_set_show_borders(bool show);
 extern void wr64_set_wavegrid(uint32_t rows, uint32_t cols);
 extern void wr64_set_fov_degrees(float deg);
 extern "C" void wr64_set_wave_interp(bool enabled);
-extern "C" void wr64_set_overscan_crop(bool enabled);
+extern "C" void wr64_set_border_mode(uint32_t mode);
 extern "C" void wr64_set_motion_blur_percent(double percent);
 extern "C" void wr64_set_sharpen_percent(double percent);
 extern "C" void rt64_wr64_request_screenshot(const char* path);
@@ -990,13 +990,21 @@ int main(int argc, char* argv[]) {
                 {3u, "widest",   "Widest (32x78)"},
                 {4u, "maximum",  "Maximum (40x96)"},
             }, 1u);
-        wr64_cfg.add_bool_option("overscan_crop", "Overscan Crop",
-            "Crop the TV-overscan margins during gameplay (with scale-up), like "
-            "a real television did: the border bands and the garbage strip at "
-            "the frame edges disappear and the game fills the whole window. "
-            "The 3D view keeps its proportions; the HUD gets the original TV "
-            "framing (slightly larger).",
-            true);
+        wr64_cfg.add_enum_option("border_mode", "Border Area",
+            "How the border band around the game image is handled during "
+            "gameplay (the image shape itself follows the Aspect Ratio "
+            "graphics setting). <recomp-color primary>Original</recomp-color> "
+            "shows black borders like a real N64 frame. <recomp-color primary>"
+            "Overscan Crop</recomp-color> crops the margins with scale-up, "
+            "like a real television did — the game fills the whole area, no "
+            "bars, no edge garbage. <recomp-color primary>Extended"
+            "</recomp-color> (experimental) shows the full uncropped frame, "
+            "including the raw frame edges.",
+            {
+                {0u, "original", "Original (black borders)"},
+                {1u, "overscan", "Overscan Crop"},
+                {2u, "extended", "Extended (experimental)"},
+            }, 1u);
         wr64_cfg.add_bool_option("fps_display", "FPS Display",
             "Show a frame-rate readout in the corner of the game window: the "
             "presented (interpolated) rate plus the game's native rate in "
@@ -1092,7 +1100,7 @@ int main(int argc, char* argv[]) {
             wr64_set_wavegrid(rows[idx], cols[idx]);
 
             wr64_set_wave_interp(std::get<bool>(cfg.get_option_value("wave_interp")));
-            wr64_set_overscan_crop(std::get<bool>(cfg.get_option_value("overscan_crop")));
+            wr64_set_border_mode(std::get<uint32_t>(cfg.get_option_value("border_mode")));
             wr64_set_motion_blur_percent(std::get<double>(cfg.get_option_value("motion_blur")));
             wr64_set_sharpen_percent(std::get<double>(cfg.get_option_value("sharpen")));
 
