@@ -1316,6 +1316,33 @@ bind a `const RenderTexture* glowAttachment = wr64Glow.get();` local, not
   glow + sharpen + motion-blur present-effect suite is fork-clean and a
   plausible upstream RT64 contribution later (self-contained passes +
   content-rect plumbing).
+- **Ghosting on fullscreen<->window (fixed)**: the persistence/motion-blur
+  accumulation kept `wr64PrevFrame` keyed only on swapchain size. A
+  FS<->window toggle re-lays-out the game image (different position/scale)
+  while dimensions can momentarily match, so the stored frame blended in as
+  stretched ghost duplicates (user saw doubled logo/text). Fix: also track
+  the captured frame's content rect and drop history when it changes. Any
+  future accumulation-style present effect must invalidate on layout change,
+  not just resize.
+
+## macOS .app bundle (2026-07-22)
+
+Once the arm64 CI went green (5 port fixes, see the CI Linux/macOS notes),
+the bare binary linked MacPorts dylibs from /opt/local — not portable. Now
+a self-contained `.app` like Zelda64Recomp/BanjoRecomp:
+`.github/macos/apple_bundle.cmake` (MACOSX_BUNDLE, Info.plist.in,
+entitlements.plist, .icns from resources/wr64_icon_preview.png best-effort)
++ `fixup_bundle.cmake` (BundleUtilities `fixup_bundle` copies SDL2/freetype
+into Contents/Frameworks and rewrites load paths), assets into
+Contents/Resources, `@executable_path/../Frameworks` rpath, ad-hoc
+`codesign` with the entitlements. Included from the CMakeLists APPLE block
+(which also links Threads::Threads + dl). Release job zips the .app with
+`zip -y` (preserves framework symlinks).
+- **NO ld64 max_prot wrapper** (Zelda/Banjo ship one): that exists for
+  runtime mod FUNCTION patching (writable+executable memory). WR64's
+  recompiled code is AOT and its mods are texture packs only, so no W+X
+  segments are needed — skipped. The exec-memory entitlements are kept for
+  parity; revisit only if a launch fails on memory protection.
 
 ## recompui bridge headers (patches/{ui_funcs,patch_helpers,recompui_event_structs}.h)
 
