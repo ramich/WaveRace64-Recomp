@@ -1204,6 +1204,60 @@ rediscovering:
 - YAML trap: no column-0 PowerShell here-string (`@"`/`"@`) inside a `run:`
   block — it breaks the workflow parse; use a PS array instead.
 
+## CI Linux build — toolchain reality (2026-07-22)
+
+Second CI target after Windows, modeled on BanjoRecomp/Zelda64Recomp's Linux
+job. Reached green in three iterations; each failure was a
+Windows-only-ism the port had never had to compile on POSIX:
+
+- **Toolchain:** ubuntu-22.04, a single `clang-15` for BOTH the host build
+  and the MIPS patches (no portable-LLVM split like Windows needs — one clang
+  does both; `-DPATCHES_C_COMPILER=clang-15 -DPATCHES_LD=ld.lld-15`). SDL2
+  2.30.3 built from source (the distro's 2.0.20 is too old for the 2.30 APIs
+  the port links) and copied into the multiarch lib dir. apt deps:
+  `ninja-build libgtk-3-dev libfreetype6-dev lld llvm clang-15` (GTK = NFD
+  file dialogs, freetype = RmlUi). The port's CMake uses
+  `find_package(SDL2)` on non-Windows (Windows FetchContents the VC zip).
+- **FAIL 1 — `libdxcompiler.so: cannot open`.** rt64's own shader rules
+  prefix the non-Windows `dxc-linux`/`dxc-macos` invocation with
+  `LD_LIBRARY_PATH=<contrib>/dxc/lib/x64` (custom commands run via sh, so a
+  leading `VAR=…` token in the command list works). Our top-level CMake
+  re-exports a `DXC` variable for the RecompFrontend shader rules and had
+  pointed it at the BARE binary — so recompui's InterfaceVS/PS.hlsl failed to
+  compile. Fix: mirror rt64's `LD_LIBRARY_PATH`/`DYLD_LIBRARY_PATH` prefix in
+  our re-export (CMakeLists, `if BUILD_RT64` block). Windows unaffected.
+- **FAIL 2 — recompui `no viable overloaded '='` on `appCore.window =
+  window_handle`.** rt64 sets `PLUME_SDL_VULKAN_ENABLED` /
+  `RT64_SDL_WINDOW_VULKAN` with DIRECTORY-scoped `add_compile_definitions`,
+  which recompui (added via a different `add_subdirectory`) does NOT inherit.
+  Without them `plume::RenderWindow` falls back to the raw X11
+  `{Display*, Window}` struct on Linux, while ultramodern's `WindowHandle` is
+  `SDL_Window*` → type mismatch. Fix: `target_compile_definitions(recompui
+  PRIVATE PLUME_SDL_VULKAN_ENABLED RT64_SDL_WINDOW_VULKAN)` after the
+  RecompFrontend add_subdirectory, gated on the same Linux+SDL-Vulkan
+  condition rt64 uses.
+- **FAIL 3 — `use of undeclared identifier '_putenv_s'`** (our own
+  src/rt64_render_context.cpp, the WR64_HUD=stretch → RT64_RECT_ASPECT_DEFAULT
+  handoff). `_putenv_s` is Windows CRT; wrapped `#ifdef _WIN32` with a POSIX
+  `setenv(name,val,1)` else-branch. Grepped src/ for the other usual CRT-only
+  suspects (`CreateDirectoryA` etc.) — the rest were already `#ifdef _WIN32`
+  gated.
+- **Renderer = Vulkan** on Linux (SPIR-V shaders precompiled at build), so the
+  package needs NO dxcompiler/dxil runtime libs — just the ELF + assets +
+  bundled libSDL2 as a fallback for distros with an SDL2 older than 2.30
+  (`LD_LIBRARY_PATH=. ./WaveRace64Recomp`). Versioned
+  `WaveRace64Recomp-Linux-X64-<ts>-<sha>.tar.gz` + .sha256.
+- The release workflow gained a `platforms` dispatch input (all/windows/linux)
+  so a single job can be iterated without also burning the 2x-billed Windows
+  runner; the `release` job now needs both builds and attaches the tarball.
+
+macOS: NOT built yet. Trouble-Makers (Mischief Makers) does NOT build macOS
+either — only Linux+Windows — so the sole reference is BanjoRecomp
+(macos-14 runner, MacPorts clang-18/llvm-18 for the MIPS patches, universal
+`-DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"`, packages a .app). The Metal
+shader path (MSL via dxc/spirv-cross) is the main unknown for our WR64-fork
+present shaders.
+
 ## recompui bridge headers (patches/{ui_funcs,patch_helpers,recompui_event_structs}.h)
 
 The game↔frontend UI contract, hand-written, game-specific (so they live in the
