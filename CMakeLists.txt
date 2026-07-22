@@ -351,6 +351,18 @@ if (WIN32)
             $<TARGET_FILE_DIR:WaveRace64Recomp>)
 endif()
 
+if (APPLE)
+    # SDL2/freetype come from MacPorts (/opt/local); the CRT/rendering path
+    # links Metal etc. via rt64's INTERFACE. Threads::Threads + dl mirror
+    # Zelda64Recomp's macOS setup. Then wrap everything into a .app bundle.
+    set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+    set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+    find_package(Threads REQUIRED)
+    target_link_libraries(WaveRace64Recomp PRIVATE ${CMAKE_DL_LIBS} Threads::Threads)
+
+    include(${CMAKE_CURRENT_SOURCE_DIR}/.github/macos/apple_bundle.cmake)
+endif()
+
 if (BUILD_RT64)
     target_link_libraries(WaveRace64Recomp PRIVATE rt64)
 endif()
