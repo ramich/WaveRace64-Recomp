@@ -119,6 +119,16 @@ extern "C" void wr64_set_sharpen_percent(double percent) {
     if (percent > 100.0) percent = 100.0;
     rt64_wr64_set_sharpen(float(percent / 100.0));
 }
+
+// Launcher hook (Enhancements -> CRT Filter): Trinitron-style CRT pass at the
+// final present (aperture grille, scanlines, curvature, rounded corners);
+// percent 0-100 mapped to intensity, 0 skips the pass entirely.
+extern "C" void rt64_wr64_set_crt(float strength);
+extern "C" void wr64_set_crt_percent(double percent) {
+    if (percent < 0.0) percent = 0.0;
+    if (percent > 100.0) percent = 100.0;
+    rt64_wr64_set_crt(float(percent / 100.0));
+}
 extern "C" uint32_t rt64_wr64_split_half_draws();
 extern "C" float rt64_wr64_split_band_a0();
 extern "C" float rt64_wr64_split_band_a1();
@@ -934,6 +944,12 @@ public:
             if (sh_env && sh_env[0] != '\0') {
                 wr64_set_sharpen_percent(std::atof(sh_env));
                 fprintf(stderr, "[WR64] sharpening (env): %s%%\n", sh_env);
+            }
+            // CRT filter: env override, percent 0-100.
+            const char* crt_env = std::getenv("WR64_CRT");
+            if (crt_env && crt_env[0] != '\0') {
+                wr64_set_crt_percent(std::atof(crt_env));
+                fprintf(stderr, "[WR64] CRT filter (env): %s%%\n", crt_env);
             }
             // Border Area mode: env override (launcher option rules otherwise).
             // WR64_OVERSCAN: 0 = Original black borders, 1 = Overscan crop

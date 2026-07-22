@@ -285,6 +285,21 @@ if (MSVC)
     endif()
     # Allow multiple definitions (e.g. guMtxF2L appears in multiple overlay sections)
     target_link_options(WaveRace64Recomp PRIVATE /FORCE:MULTIPLE)
+elseif (APPLE)
+    # Apple's ld64 knows neither --start-group/--end-group nor
+    # --allow-multiple-definition (GNU ld options); it resolves static-archive
+    # cycles without grouping, so a plain list links fine (Zelda64Recomp does
+    # the same on macOS).
+    target_link_libraries(WaveRace64Recomp PRIVATE
+        recomp_funcs
+        PatchesLib
+        librecomp
+        ultramodern
+        SDL2::SDL2
+    )
+    if (RECOMP_FRONTEND_PATH)
+        target_link_libraries(WaveRace64Recomp PRIVATE recompui recompinput)
+    endif()
 else()
     target_link_libraries(WaveRace64Recomp PRIVATE
         -Wl,--start-group

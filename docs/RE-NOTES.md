@@ -1258,6 +1258,42 @@ either — only Linux+Windows — so the sole reference is BanjoRecomp
 shader path (MSL via dxc/spirv-cross) is the main unknown for our WR64-fork
 present shaders.
 
+## CRT filter (Trinitron) — present pass + content-rect plumbing (2026-07-22)
+
+Enhancements → "CRT Filter (0% = off)" / `WR64_CRT=<0-100>`: single-pass
+Trinitron look (aperture grille, scanlines, barrel curvature, rounded
+corners, vignette, brightness compensation), one intensity slider scaling
+the whole tuned look. Same pattern as motion blur/sharpen — a present-time
+pixel shader in the rt64 fork — with one NEW piece of infrastructure worth
+remembering:
+
+- **Content-rect plumbing** (`rt64_wr64_get_content_rect` +
+  `rt64_wr64_get_content_src_rows`, rt64_vi_renderer.cpp): the present-queue
+  passes previously had NO access to where the game image sits in the
+  swapchain (sharpen/blur are full-frame, so it never mattered). The VI
+  renderer now publishes the final blit rect per present — after crop43
+  pillarbox, frame-side bars, and band blackout — plus the number of visible
+  SOURCE rows (198 content rows vs 240 full frame). The CRT shader maps its
+  curvature/corners onto that rect ("tube"), so black bars stay flat in
+  every Border Area / Aspect Ratio combination, and 2P split-screen gets ONE
+  tube spanning both halves (like the real console on a real CRT). Scanline
+  pitch is locked to source rows, not output pixels.
+- **Pass order**: VI blit → sharpen → motion blur → **CRT** → UI hook. CRT
+  last keeps the phosphor mask off the blur's accumulation history (the mask
+  "sits on the glass") and off the launcher/overlays.
+- **Linear sampling**: curvature needs smooth UVs; TextureCopyDescriptorSet
+  has no sampler, so the CRT pipeline reuses the VideoInterfaceDescriptorSet
+  shape (texture t1 + immutable linear sampler s2) — no new descriptor-set
+  type needed. It shares the sharpen pass's scratch texture (runs after it).
+- **Resolution-adaptive**: grille pitch = max(3 px, ~0.75 × output pixels
+  per source scanline) so the mask scales with window size instead of
+  vanishing at 4K; below ~3 px per scanline/triad both masks fade out
+  (moiré guard) and small windows degrade to curvature+vignette.
+- Tuned strengths at 100%: grille 0.40, scanlines 0.35, curvature 0.045,
+  corner radius 0.02+0.06k, vignette 0.12, gain cap 1.35.
+- Deferred: phosphor glow/bloom (would need a downsample+blur chain);
+  per-component env fine-tuning knobs.
+
 ## recompui bridge headers (patches/{ui_funcs,patch_helpers,recompui_event_structs}.h)
 
 The game↔frontend UI contract, hand-written, game-specific (so they live in the

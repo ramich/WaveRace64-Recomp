@@ -53,6 +53,7 @@ extern "C" void wr64_set_wave_interp(bool enabled);
 extern "C" void wr64_set_border_mode(uint32_t mode);
 extern "C" void wr64_set_motion_blur_percent(double percent);
 extern "C" void wr64_set_sharpen_percent(double percent);
+extern "C" void wr64_set_crt_percent(double percent);
 extern "C" void rt64_wr64_request_screenshot(const char* path);
 
 // FPS overlay configuration (set from the launcher Enhancements tab on the UI
@@ -1062,6 +1063,14 @@ int main(int argc, char* argv[]) {
             "upscaled image without ringing halos. Applies live; the launcher "
             "UI is unaffected.",
             0.0);
+        wr64_cfg.add_percent_number_option("crt_filter", "CRT Filter (0% = off)",
+            "Trinitron-style CRT look: aperture-grille phosphor stripes, "
+            "scanlines locked to the game's real lines, slight screen "
+            "curvature with rounded corners and a mild vignette. The slider "
+            "scales the whole effect; it follows the game area (black bars "
+            "stay flat) and adapts to the window size and resolution. "
+            "Applies live; the launcher UI is unaffected.",
+            0.0);
         wr64_cfg.add_percent_number_option("motion_blur", "Motion Blur (experimental, 0% = off)",
             "Accumulation motion blur at the final present: each frame keeps a "
             "fading trail of the previous ones. At 0% the effect is fully "
@@ -1118,6 +1127,7 @@ int main(int argc, char* argv[]) {
             wr64_set_border_mode(std::get<uint32_t>(cfg.get_option_value("border_mode")));
             wr64_set_motion_blur_percent(std::get<double>(cfg.get_option_value("motion_blur")));
             wr64_set_sharpen_percent(std::get<double>(cfg.get_option_value("sharpen")));
+            wr64_set_crt_percent(std::get<double>(cfg.get_option_value("crt_filter")));
 
             s_fps_show.store(std::get<bool>(cfg.get_option_value("fps_display")));
             s_fps_pos.store(std::get<uint32_t>(cfg.get_option_value("fps_position")));
