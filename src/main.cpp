@@ -413,11 +413,21 @@ static ultramodern::renderer::WindowHandle create_window(void* /*gfx_data*/) {
     if (!window) {
         fprintf(stderr, "[WR64] SDL_CreateWindow failed: %s\n", SDL_GetError());
     }
-#ifdef _WIN32
+#if defined(_WIN32)
     SDL_SysWMinfo wmInfo;
     SDL_VERSION(&wmInfo.version);
     SDL_GetWindowWMInfo(window, &wmInfo);
     return ultramodern::renderer::WindowHandle{ wmInfo.info.win.window, GetCurrentThreadId() };
+#elif defined(__APPLE__)
+    // macOS WindowHandle is { NSWindow*, CAMetalLayer* } (RT64/plume Metal
+    // backend). Same construction as Zelda64Recomp/BanjoRecomp: the NSWindow
+    // from the SDL syswm info, and a Metal layer from an SDL-created view.
+    SDL_SysWMinfo wmInfo;
+    SDL_VERSION(&wmInfo.version);
+    SDL_GetWindowWMInfo(window, &wmInfo);
+    SDL_MetalView metal_view = SDL_Metal_CreateView(window);
+    return ultramodern::renderer::WindowHandle{ wmInfo.info.cocoa.window,
+                                                SDL_Metal_GetLayer(metal_view) };
 #else
     return window;
 #endif
