@@ -1291,8 +1291,31 @@ remembering:
   (moiré guard) and small windows degrade to curvature+vignette.
 - Tuned strengths at 100%: grille 0.40, scanlines 0.35, curvature 0.045,
   corner radius 0.02+0.06k, vignette 0.12, gain cap 1.35.
-- Deferred: phosphor glow/bloom (would need a downsample+blur chain);
-  per-component env fine-tuning knobs.
+
+Phosphor simulation extended (2026-07-22, same slider): the aperture grille
+already IS the RGB-phosphor-stripe simulation; added the three things beyond
+it that sell the tube:
+- **Glow/halation**: WR64GlowPS bright-pass tent-blur (threshold 0.60,
+  soft knee) into a QUARTER-RES color target (new
+  RenderTextureDesc::ColorTarget + framebuffer in the present queue), which
+  the CRT shader samples (bilinear → effectively wide) at the DISTORTED
+  position and adds over the masked image at 0.35*k. New
+  WR64CrtDescriptorSet {frame t1, linear sampler s2, glow t3}. One extra
+  quarter-res pass — negligible cost, verified 60 fps.
+- **P22 phosphor color**: 3x3 channel-crosstalk toward CRT primaries
+  (lerp by k) + CRT gamma (1.0→1.10 by k) for the warm/denser tube tint.
+- **Phosphor persistence**: a very small 0.12*k accumulation trail folded
+  into the EXISTING motion-blur pass (`blurK = max(motionBlur, crt*0.12)`),
+  so highlights linger a few frames without a new pass; an explicit Motion
+  Blur setting still wins when larger. Kept minimal deliberately (a 20 Hz
+  interpolated game makes strong persistence read as a bug).
+Framebuffer gotcha: RenderFramebufferDesc takes `const RenderTexture**` —
+bind a `const RenderTexture* glowAttachment = wr64Glow.get();` local, not
+`&wr64Glow` (unique_ptr).
+- Deferred: per-component env fine-tuning knobs. NOTE the whole CRT +
+  glow + sharpen + motion-blur present-effect suite is fork-clean and a
+  plausible upstream RT64 contribution later (self-contained passes +
+  content-rect plumbing).
 
 ## recompui bridge headers (patches/{ui_funcs,patch_helpers,recompui_event_structs}.h)
 

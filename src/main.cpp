@@ -1066,10 +1066,11 @@ int main(int argc, char* argv[]) {
         wr64_cfg.add_percent_number_option("crt_filter", "CRT Filter (0% = off)",
             "Trinitron-style CRT look: aperture-grille phosphor stripes, "
             "scanlines locked to the game's real lines, slight screen "
-            "curvature with rounded corners and a mild vignette. The slider "
-            "scales the whole effect; it follows the game area (black bars "
-            "stay flat) and adapts to the window size and resolution. "
-            "Applies live; the launcher UI is unaffected.",
+            "curvature with rounded corners, a mild vignette, phosphor "
+            "glow/halation, warm phosphor color and a subtle fading trail. "
+            "The slider scales the whole effect; it follows the game area "
+            "(black bars stay flat) and adapts to the window size and "
+            "resolution. Applies live; the launcher UI is unaffected.",
             0.0);
         wr64_cfg.add_percent_number_option("motion_blur", "Motion Blur (experimental, 0% = off)",
             "Accumulation motion blur at the final present: each frame keeps a "
