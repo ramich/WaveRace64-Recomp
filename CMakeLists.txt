@@ -113,6 +113,15 @@ if (RECOMP_FRONTEND_PATH)
     set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH "${CMAKE_CURRENT_SOURCE_DIR}/lib/N64ModernRuntime" CACHE PATH "" FORCE)
     set(RECOMP_FRONTEND_RT64_PATH "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64" CACHE PATH "" FORCE)
     add_subdirectory(${RECOMP_FRONTEND_PATH} ${CMAKE_BINARY_DIR}/recompfrontend EXCLUDE_FROM_ALL)
+    # rt64 enables PLUME_SDL_VULKAN_ENABLED / RT64_SDL_WINDOW_VULKAN via
+    # directory-scoped add_compile_definitions, which recompui (added from a
+    # different directory) does NOT inherit. Without them plume::RenderWindow
+    # is the raw X11 {Display*, Window} pair on Linux while ultramodern's
+    # WindowHandle is an SDL_Window*, and recompui's renderer fails to
+    # compile ("no viable overloaded '='"). Mirror the defines here.
+    if (BUILD_RT64 AND CMAKE_SYSTEM_NAME MATCHES "Linux" AND RT64_SDL_WINDOW_VULKAN AND TARGET recompui)
+        target_compile_definitions(recompui PRIVATE PLUME_SDL_VULKAN_ENABLED RT64_SDL_WINDOW_VULKAN)
+    endif()
 else()
     message(STATUS "RecompFrontend: not found (set RECOMP_FRONTEND_PATH to enable launcher UI)")
 endif()
