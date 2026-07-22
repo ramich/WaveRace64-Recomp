@@ -304,6 +304,11 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 #include <windows.h>
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
+#elif defined(__APPLE__)
+// SDL_SysWMinfo (NSWindow lookup) + SDL_Metal_CreateView for the macOS
+// WindowHandle {NSWindow*, CAMetalLayer*} construction in create_window.
+#include <SDL_syswm.h>
+#include <SDL_metal.h>
 #endif
 
 #include "register_patches.h"
