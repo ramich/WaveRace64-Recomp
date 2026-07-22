@@ -19,6 +19,13 @@ if (WIN32)
     # Enable the resource compiler so the custom application icon
     # (resources/wr64.rc -> resources/wr64.ico) is embedded in the exe.
     enable_language(RC)
+elseif (APPLE)
+    # RT64/plume's Metal backend has Objective-C++ (.mm) sources. The
+    # language must be enabled at the TOP level — rt64's own
+    # enable_language(OBJC OBJCXX) is scoped to its subdirectory and does not
+    # propagate up, so CMake's generate step fails with a missing
+    # CMAKE_OBJCXX_COMPILE_OBJECT. Matches Zelda64Recomp/BanjoRecomp.
+    enable_language(OBJC OBJCXX)
 endif()
 
 # =============================================================================
