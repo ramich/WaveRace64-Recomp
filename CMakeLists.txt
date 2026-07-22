@@ -79,19 +79,24 @@ endif()
 # CMake normal variables set inside add_subdirectory do NOT propagate back.
 if (BUILD_RT64)
     set(_rt64_src "${CMAKE_CURRENT_SOURCE_DIR}/lib/rt64/src")
+    # Non-Windows dxc is a portable binary that needs its bundled
+    # libdxcompiler next to it at RUNTIME — rt64's own CMake prefixes the
+    # command with LD_LIBRARY_PATH/DYLD_LIBRARY_PATH (custom commands run via
+    # sh, so a leading VAR=... token works); mirror that here or the
+    # RecompFrontend shader rules fail with "libdxcompiler.so: cannot open".
     if (WIN32)
         set(DXC "${_rt64_src}/contrib/dxc/bin/x64/dxc.exe")
     elseif (APPLE)
         if (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-            set(DXC "${_rt64_src}/contrib/dxc/bin/arm64/dxc-macos")
+            set(DXC "DYLD_LIBRARY_PATH=${_rt64_src}/contrib/dxc/lib/arm64" "${_rt64_src}/contrib/dxc/bin/arm64/dxc-macos")
         else()
-            set(DXC "${_rt64_src}/contrib/dxc/bin/x64/dxc-macos")
+            set(DXC "DYLD_LIBRARY_PATH=${_rt64_src}/contrib/dxc/lib/x64" "${_rt64_src}/contrib/dxc/bin/x64/dxc-macos")
         endif()
     else()
         if (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-            set(DXC "${_rt64_src}/contrib/dxc/bin/arm64/dxc-linux")
+            set(DXC "LD_LIBRARY_PATH=${_rt64_src}/contrib/dxc/lib/arm64" "${_rt64_src}/contrib/dxc/bin/arm64/dxc-linux")
         else()
-            set(DXC "${_rt64_src}/contrib/dxc/bin/x64/dxc-linux")
+            set(DXC "LD_LIBRARY_PATH=${_rt64_src}/contrib/dxc/lib/x64" "${_rt64_src}/contrib/dxc/bin/x64/dxc-linux")
         endif()
     endif()
     set(DXC_COMMON_OPTS "-I${_rt64_src}")
