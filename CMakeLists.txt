@@ -285,6 +285,13 @@ if (MSVC)
     endif()
     # Allow multiple definitions (e.g. guMtxF2L appears in multiple overlay sections)
     target_link_options(WaveRace64Recomp PRIVATE /FORCE:MULTIPLE)
+    # Crash forensics: emit a PDB + linker map even in Release so the minidump
+    # handler's dumps (crash_dumps/) resolve to function names — /Z7 debug info
+    # for the port sources, /DEBUG collects it plus public symbols of ALL
+    # linked code (including the recompiled game functions) into the PDB.
+    # Costs some link time, zero runtime cost; the PDB stays out of dist/.
+    target_compile_options(WaveRace64Recomp PRIVATE /Z7)
+    target_link_options(WaveRace64Recomp PRIVATE /DEBUG /MAP:WaveRace64Recomp.map)
 elseif (APPLE)
     # Apple's ld64 knows neither --start-group/--end-group nor
     # --allow-multiple-definition (GNU ld options); it resolves static-archive

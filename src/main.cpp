@@ -54,6 +54,7 @@ extern "C" void wr64_set_border_mode(uint32_t mode);
 extern "C" void wr64_set_motion_blur_percent(double percent);
 extern "C" void wr64_set_sharpen_percent(double percent);
 extern "C" void wr64_set_crt_percent(double percent);
+extern "C" void wr64_set_crt_bezel(bool enabled);
 extern "C" void rt64_wr64_request_screenshot(const char* path);
 
 // FPS overlay configuration (set from the launcher Enhancements tab on the UI
@@ -1067,11 +1068,17 @@ int main(int argc, char* argv[]) {
             "Trinitron-style CRT look: aperture-grille phosphor stripes, "
             "scanlines locked to the game's real lines, slight screen "
             "curvature with rounded corners, a mild vignette, phosphor "
-            "glow/halation, warm phosphor color and a subtle fading trail. "
-            "The slider scales the whole effect; it follows the game area "
-            "(black bars stay flat) and adapts to the window size and "
-            "resolution. Applies live; the launcher UI is unaffected.",
+            "glow/halation and warm phosphor color. The slider scales these; "
+            "it follows the game area (black bars stay flat) and adapts to "
+            "the window size and resolution. Applies live; the launcher UI "
+            "is unaffected.",
             0.0);
+        wr64_cfg.add_bool_option("crt_bezel", "CRT Bezel",
+            "Draw a TV bezel with depth and a soft screen reflection around "
+            "the picture. Independent of the CRT Filter slider (fixed "
+            "strength) — looks best with the CRT Filter on and some black "
+            "border area around the image.",
+            true);
         wr64_cfg.add_percent_number_option("motion_blur", "Motion Blur (experimental, 0% = off)",
             "Accumulation motion blur at the final present: each frame keeps a "
             "fading trail of the previous ones. At 0% the effect is fully "
@@ -1129,6 +1136,7 @@ int main(int argc, char* argv[]) {
             wr64_set_motion_blur_percent(std::get<double>(cfg.get_option_value("motion_blur")));
             wr64_set_sharpen_percent(std::get<double>(cfg.get_option_value("sharpen")));
             wr64_set_crt_percent(std::get<double>(cfg.get_option_value("crt_filter")));
+            wr64_set_crt_bezel(std::get<bool>(cfg.get_option_value("crt_bezel")));
 
             s_fps_show.store(std::get<bool>(cfg.get_option_value("fps_display")));
             s_fps_pos.store(std::get<uint32_t>(cfg.get_option_value("fps_position")));

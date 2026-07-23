@@ -124,10 +124,19 @@ extern "C" void wr64_set_sharpen_percent(double percent) {
 // final present (aperture grille, scanlines, curvature, rounded corners);
 // percent 0-100 mapped to intensity, 0 skips the pass entirely.
 extern "C" void rt64_wr64_set_crt(float strength);
+extern "C" void rt64_wr64_set_crt_persist(int enabled);
+extern "C" void rt64_wr64_set_crt_bezel(int enabled);
 extern "C" void wr64_set_crt_percent(double percent) {
     if (percent < 0.0) percent = 0.0;
     if (percent > 100.0) percent = 100.0;
     rt64_wr64_set_crt(float(percent / 100.0));
+}
+
+// Launcher hook (Enhancements -> CRT Bezel): the TV-frame-with-depth +
+// reflection around the tube, on/off, fixed strength (independent of the
+// CRT intensity slider).
+extern "C" void wr64_set_crt_bezel(bool enabled) {
+    rt64_wr64_set_crt_bezel(enabled ? 1 : 0);
 }
 extern "C" uint32_t rt64_wr64_split_half_draws();
 extern "C" float rt64_wr64_split_band_a0();
@@ -950,6 +959,20 @@ public:
             if (crt_env && crt_env[0] != '\0') {
                 wr64_set_crt_percent(std::atof(crt_env));
                 fprintf(stderr, "[WR64] CRT filter (env): %s%%\n", crt_env);
+            }
+            // CRT phosphor persistence: OFF by default (ghosts on a manual
+            // window resize); opt in with WR64_CRT_PERSIST=1.
+            const char* crtp_env = std::getenv("WR64_CRT_PERSIST");
+            if (crtp_env && crtp_env[0] == '1') {
+                rt64_wr64_set_crt_persist(1);
+                fprintf(stderr, "[WR64] CRT phosphor persistence enabled (env)\n");
+            }
+            // CRT bezel (TV frame + reflection): on by default; WR64_CRT_BEZEL=0
+            // disables it.
+            const char* crtb_env = std::getenv("WR64_CRT_BEZEL");
+            if (crtb_env && crtb_env[0] == '0') {
+                rt64_wr64_set_crt_bezel(0);
+                fprintf(stderr, "[WR64] CRT bezel disabled (env)\n");
             }
             // Border Area mode: env override (launcher option rules otherwise).
             // WR64_OVERSCAN: 0 = Original black borders, 1 = Overscan crop
