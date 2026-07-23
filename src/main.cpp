@@ -316,6 +316,37 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 #include "register_patches.h"
 
 #ifdef _WIN32
+#include <tlhelp32.h>
+
+// Suspend every OTHER thread in the process before writing the dump. WR64
+// runs several real OS threads (gfx, RSP, audio, present); if they keep
+// mutating heap/stack memory while MiniDumpWriteDump walks it, the writer can
+// itself fault or simply fail outright — observed as a SILENT 0-byte dump
+// (CreateFile succeeded, MiniDumpWriteDump's return value was never checked).
+// This is the standard fix for a minidump handler in a multi-threaded native
+// process. Threads are never resumed — the process is about to terminate.
+static void wr64_suspend_other_threads(DWORD excludeThreadId) {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    THREADENTRY32 te{};
+    te.dwSize = sizeof(te);
+    const DWORD pid = GetCurrentProcessId();
+    if (Thread32First(snap, &te)) {
+        do {
+            if (te.dwSize >= (FIELD_OFFSET(THREADENTRY32, th32OwnerProcessID) + sizeof(te.th32OwnerProcessID)) &&
+                te.th32OwnerProcessID == pid && te.th32ThreadID != excludeThreadId) {
+                HANDLE th = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID);
+                if (th != nullptr) {
+                    SuspendThread(th);
+                    CloseHandle(th);
+                }
+            }
+            te.dwSize = sizeof(te);
+        } while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+}
+
 // ---------------------------------------------------------------------------
 // Crash minidump handler. The known later-course crash is a 0xc0000005 at a
 // computed/garbage address (bad indirect call), so the Event Log record alone
@@ -324,6 +355,8 @@ static constexpr size_t TOTAL_NUM_SECTIONS = 21; // 19 code + potential data/BSS
 // look at the faulting thread's stack against the recompiled function names).
 // ---------------------------------------------------------------------------
 static LONG WINAPI wr64_crash_handler(EXCEPTION_POINTERS* info) {
+    wr64_suspend_other_threads(GetCurrentThreadId());
+
     CreateDirectoryA("crash_dumps", nullptr);
 
     SYSTEMTIME st;
@@ -344,12 +377,22 @@ static LONG WINAPI wr64_crash_handler(EXCEPTION_POINTERS* info) {
         const MINIDUMP_TYPE type = (MINIDUMP_TYPE)(
             MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory |
             MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
-        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
-                          type, &mei, nullptr, nullptr);
+        const BOOL ok = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+                                          type, &mei, nullptr, nullptr);
+        const DWORD dumpErr = GetLastError();
         CloseHandle(file);
-        fprintf(stderr, "[WR64] CRASH: exception 0x%08lX at %p — minidump written to %s\n",
-                info->ExceptionRecord->ExceptionCode,
-                info->ExceptionRecord->ExceptionAddress, path);
+        if (ok) {
+            fprintf(stderr, "[WR64] CRASH: exception 0x%08lX at %p — minidump written to %s\n",
+                    info->ExceptionRecord->ExceptionCode,
+                    info->ExceptionRecord->ExceptionAddress, path);
+        } else {
+            // Previously this branch was unreachable (return value ignored) —
+            // a failed MiniDumpWriteDump silently left a 0-byte file while
+            // logging "minidump written". Now it's both checked and logged.
+            fprintf(stderr, "[WR64] CRASH: exception 0x%08lX at %p — MiniDumpWriteDump FAILED (%lu), %s is empty\n",
+                    info->ExceptionRecord->ExceptionCode,
+                    info->ExceptionRecord->ExceptionAddress, dumpErr, path);
+        }
     } else {
         fprintf(stderr, "[WR64] CRASH: exception 0x%08lX — failed to write minidump (%lu)\n",
                 info->ExceptionRecord->ExceptionCode, GetLastError());

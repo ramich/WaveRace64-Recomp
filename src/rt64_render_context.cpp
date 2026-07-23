@@ -62,6 +62,7 @@ extern "C" void rt64_wr64_set_vertex_interp(int enabled);
 extern "C" void rt64_wr64_set_vertex_interp_rigid(int enabled);
 extern "C" void rt64_wr64_set_overscan(float l, float r, float t, float b);
 extern "C" void rt64_wr64_set_crop43_mode(int mode);
+extern "C" void rt64_wr64_set_tube43(int enabled);
 extern "C" void rt64_wr64_set_frame_sides(float frac);
 extern "C" void rt64_wr64_set_split_remap(int enabled);
 extern "C" void rt64_wr64_set_motion_blur(float strength);
@@ -138,6 +139,7 @@ extern "C" void wr64_set_crt_percent(double percent) {
 extern "C" void wr64_set_crt_bezel(bool enabled) {
     rt64_wr64_set_crt_bezel(enabled ? 1 : 0);
 }
+
 extern "C" uint32_t rt64_wr64_split_half_draws();
 extern "C" float rt64_wr64_split_band_a0();
 extern "C" float rt64_wr64_split_band_a1();
@@ -1208,6 +1210,12 @@ public:
                         crop43_mode = 1;
                     }
                     rt64_wr64_set_crop43_mode(crop43_mode);
+                    // CRT/bezel tube policy: the simulated tube follows the
+                    // ASPECT selection only (Expand = full present area, 4:3 =
+                    // the crop box) so it stays put across menu<->gameplay —
+                    // the menu pillarbox appears inside the glass instead of
+                    // shrinking the "TV".
+                    rt64_wr64_set_tube43(s_want_43.load() ? 1 : 0);
                     if (widescreen_enabled && scene_aspect_enabled && wanted != s_crop_requested) {
                         s_crop_requested = wanted;
                         // Presentation-level pillarbox: rendering stays wide
@@ -1404,9 +1412,10 @@ public:
                             };
                             bool perspective = (mtx16(15) == 0); // m[3][3]
                             static const char* proj_env = std::getenv("WR64_POKE_PROJ");
+                            static const char* projlog_env = std::getenv("WR64_DEBUG_LOG");
                             static int proj_seen = 0;
                             proj_seen++;
-                            if (perspective && (proj_seen % 200) == 0) {
+                            if (projlog_env && projlog_env[0] == '1' && perspective && (proj_seen % 200) == 0) {
                                 fprintf(stderr,
                                     "[PROJ] perspective mtx at 0x%08X: m00=%d.%04X m11=%d.%04X m23=%d m33=%d\n",
                                     0x80000000u + mtx,
