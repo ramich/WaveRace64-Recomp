@@ -969,12 +969,16 @@ public:
                 rt64_wr64_set_crt_persist(1);
                 fprintf(stderr, "[WR64] CRT phosphor persistence enabled (env)\n");
             }
-            // CRT bezel (TV frame + reflection): on by default; WR64_CRT_BEZEL=0
-            // disables it.
+            // CRT bezel (overlay image): WR64_CRT_BEZEL=0 forces off, =1 forces
+            // on (overrides the launcher config either way).
             const char* crtb_env = std::getenv("WR64_CRT_BEZEL");
             if (crtb_env && crtb_env[0] == '0') {
                 rt64_wr64_set_crt_bezel(0);
                 fprintf(stderr, "[WR64] CRT bezel disabled (env)\n");
+            }
+            else if (crtb_env && crtb_env[0] == '1') {
+                rt64_wr64_set_crt_bezel(1);
+                fprintf(stderr, "[WR64] CRT bezel enabled (env)\n");
             }
             // Border Area mode: env override (launcher option rules otherwise).
             // WR64_OVERSCAN: 0 = Original black borders, 1 = Overscan crop
