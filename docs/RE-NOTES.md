@@ -695,6 +695,22 @@ stack. Not a full-machine save-state candidate — recomps run native across rea
 threads, so emulator-style save states aren't feasible (RDRAM+context snapshot at
 a frame boundary is a research project, not a quick add).
 
+Minidump handler shipped and DID catch a real crash (2026-07-23), but the
+first catch was useless: the dump resolved to a raw
+`WaveRace64Recomp+0x3ee9df` offset with a corrupted stack unwind (the crash
+profile — jump to a garbage address — makes stack-walking unreliable
+without symbols to anchor it). **The build was Release with no debug
+info at all** — `/Z7` only touched the MIPS-patches compile, not the main
+port sources, and there was no `/DEBUG` linker flag, so no PDB existed to
+resolve anything, ever. Fixed: `target_compile_options(... /Z7)` +
+`target_link_options(... /DEBUG /MAP:...)` on the main `WaveRace64Recomp`
+target (CMakeLists.txt, MSVC-only block) — emits a full PDB (covers every
+statically-linked static lib too, including the recompiled game functions)
+and a linker `.map` as a human-readable fallback. Zero runtime cost (debug
+info doesn't touch codegen), PDB/map are ~9MB/~17MB and intentionally not
+copied into `dist/`. Next crash's dump should resolve to actual function
+names.
+
 ## HD texture replacement (RT64 packs) — wired 2026-07-18
 
 RT64 has a first-class texture-replacement system (TextureCache + replacementMap,
@@ -1293,37 +1309,118 @@ remembering:
   corner radius 0.02+0.06k, vignette 0.12, gain cap 1.35.
 
 Phosphor simulation extended (2026-07-22, same slider): the aperture grille
-already IS the RGB-phosphor-stripe simulation; added the three things beyond
-it that sell the tube:
-- **Glow/halation**: WR64GlowPS bright-pass tent-blur (threshold 0.60,
-  soft knee) into a QUARTER-RES color target (new
-  RenderTextureDesc::ColorTarget + framebuffer in the present queue), which
-  the CRT shader samples (bilinear → effectively wide) at the DISTORTED
-  position and adds over the masked image at 0.35*k. New
-  WR64CrtDescriptorSet {frame t1, linear sampler s2, glow t3}. One extra
-  quarter-res pass — negligible cost, verified 60 fps.
-- **P22 phosphor color**: 3x3 channel-crosstalk toward CRT primaries
-  (lerp by k) + CRT gamma (1.0→1.10 by k) for the warm/denser tube tint.
-- **Phosphor persistence**: a very small 0.12*k accumulation trail folded
-  into the EXISTING motion-blur pass (`blurK = max(motionBlur, crt*0.12)`),
-  so highlights linger a few frames without a new pass; an explicit Motion
-  Blur setting still wins when larger. Kept minimal deliberately (a 20 Hz
-  interpolated game makes strong persistence read as a bug).
-Framebuffer gotcha: RenderFramebufferDesc takes `const RenderTexture**` —
-bind a `const RenderTexture* glowAttachment = wr64Glow.get();` local, not
-`&wr64Glow` (unique_ptr).
-- Deferred: per-component env fine-tuning knobs. NOTE the whole CRT +
-  glow + sharpen + motion-blur present-effect suite is fork-clean and a
-  plausible upstream RT64 contribution later (self-contained passes +
-  content-rect plumbing).
-- **Ghosting on fullscreen<->window (fixed)**: the persistence/motion-blur
-  accumulation kept `wr64PrevFrame` keyed only on swapchain size. A
-  FS<->window toggle re-lays-out the game image (different position/scale)
-  while dimensions can momentarily match, so the stored frame blended in as
-  stretched ghost duplicates (user saw doubled logo/text). Fix: also track
-  the captured frame's content rect and drop history when it changes. Any
-  future accumulation-style present effect must invalidate on layout change,
-  not just resize.
+already IS the RGB-phosphor-stripe simulation; added the things beyond it
+that sell the tube — P22 phosphor color (3x3 channel-crosstalk toward CRT
+primaries + CRT gamma, both lerp'd by k), phosphor glow/halation, and (later
+made an independent toggle) a physical TV bezel with reflection. This round
+surfaced two real regressions, both found by deliberately trying to break
+the effect with a live window resize rather than trusting a single "looks
+fine" screenshot — worth internalizing as a testing habit for any future
+present-time effect with a persistent buffer.
+
+**Glow/halation is now computed INLINE in the CRT shader, not a separate
+render target.** The first implementation (WR64GlowPS) bright-pass-blurred
+the frame into a separate quarter-res color target once per present, which
+the CRT shader then sampled. That target's lazy (re)allocation was keyed on
+SIZE only — and a live window drag-resize rebuilds the swapchain almost
+every present, so a transient size match left the glow target and its
+descriptor set bound to stale/recycled VRAM. The result: a permanent hazy
+overlay that never cleared, visible after ANY manual resize (not just
+fullscreen<->window — plain drag-resize on either axis reproduced it, user
+caught it after a vertical resize specifically). Diagnosis method: bisect by
+disabling one contributing factor at a time (CRT off entirely → clean;
+persistence off → still broken; ergo the glow target) rather than guessing
+from one screenshot — the same lesson as below. **Fix: deleted the separate
+glow target/pass and shader entirely** — `CrtHalation()` in WR64CrtPS.hlsl
+now does its own 12-tap bright-passed blur (threshold 0.60, soft knee)
+directly off the existing scratch-copy texture, sampled at the distorted
+position and added at 0.45*k. One texture, one pass, nothing to
+reallocate-out-of-sync with the swapchain generation.
+
+**Phosphor persistence defaults OFF** (`WR64_CRT_PERSIST=1` opts back in,
+`rt64_wr64_get/set_crt_persist`). It reuses the existing motion-blur
+accumulation buffer (`blurK = max(motionBlur, crt*0.12)`) — that buffer
+also never fully recovered after a drag-resize in testing, so rather than
+chase it further the trail (always a "kept minimal deliberately" nice-to-
+have, not core to the CRT look) was switched to opt-in.
+
+**Belt-and-suspenders against the whole class of bug**: swapchain
+framebuffer (re)creation (`rt64_present_queue.cpp`, where
+`swapChainFramebuffers.empty()`) now drops ALL present-effect resources —
+scratch, blur history, CRT descriptor set — not just the ones a given bug
+touched, plus a one-shot `wr64SkipEffectsOnce` flag that sits the very next
+present out entirely. Belt-and-suspenders because the inline-halation fix
+above already removes the specific reallocation race; this is defense
+against the *next* present effect someone adds making the same mistake.
+
+**CRT Bezel** (Enhancements → "CRT Bezel", `WR64_CRT_BEZEL=0`, default on,
+`rt64_wr64_get/set_crt_bezel`): a TV frame with actual depth, independent
+on/off at FIXED strength — does NOT fade with the CRT Filter intensity
+slider, so a low-intensity CRT look still gets a full-strength frame.
+Three iterations to get the geometry right, each one a real user-caught
+visual bug, worth remembering for any future rounded-rect/frame shader:
+
+1. **Depth shading**: the frame "walls" face the tube center and are lit
+   from below (like a real recessed console screen) — computed from the
+   outward normal of the rounded-rect SDF (`dirO`), not just a radial
+   falloff, so the top of the frame reads as shadowed and the bottom as lit
+   exactly like the reference photo the user linked.
+2. **Corner geometry must be computed in PIXEL space, not normalized tube
+   space.** The rounded-rect SDF was first written in the [-1,1] tube
+   space; on a wide window that space is anisotropic (squashed >2:1), which
+   turned the corner ARCS into flat elliptical chamfers — straight
+   45-degree cuts to the eye — and made the frame visibly thicker on the
+   sides than top/bottom. Rewritten with `halfPix = tubeSize * 0.5` and the
+   SDF evaluated in pixels: circular arcs and uniform frame width at any
+   aspect ratio.
+3. **The frame opening must be defined in the DISTORTED (barrel-warped)
+   image space, with straight edges exactly on the image boundary and
+   corner arcs cutting INTO the image, not into the surrounding black.**
+   Cutting the opening in flat/undistorted space left a black gap between
+   the barrel-shrunk image corners and the (larger, un-shrunk) frame
+   opening — visible as a dark "moat" in every corner, worse on bright
+   scenes where it read as an obviously wrong void. The fix models a real
+   TV: the picture tube sits UNDER the bezel, so the opening's geometry is
+   anchored to the image itself (`qd = (abs(d) - 1) * halfPix + cornerR`),
+   which by construction cannot show a gap regardless of window aspect.
+   Bright corner content also used to spill PAST the rounded opening as a
+   squared-off white ledge (the reflection sampled undistorted screen-space
+   color without accounting for the corner curve) — fixed together with a
+   dark "glass gap" ring (`smoothstep(0.03, 0.28, t)`) that keeps the
+   reflection from starting until past the glass edge, and Reinhard
+   tone-compression on the reflection color (`x / (1 + 2.5x) * 1.4`) so a
+   reflected sky/surf highlight can't reach full white and paper over the
+   rounded corner the way raw HDR-ish values did.
+   Corner-radius and glass-gap constants ended up FIXED (not scaled by CRT
+   intensity) once the bezel became its own toggle — a partial-intensity
+   CRT effect with a partial-strength frame looked inconsistent.
+4. Vignette (separate from the bezel, part of the base CRT look) capped at
+   -22% instead of scaling unbounded with `r2^2` — at the true tube corners
+   `r2` reaches ~2.0, which without a cap sank the corners into a near-black
+   pit that fought visually with the bezel's own corner shading.
+
+Deferred: per-component env fine-tuning knobs. NOTE the whole CRT + sharpen
++ motion-blur present-effect suite (plus the bezel) is fork-clean and a
+plausible upstream RT64 contribution later (self-contained passes +
+content-rect plumbing).
+
+**Ghosting on fullscreen<->window (fixed, separate from the resize bug
+above)**: the persistence/motion-blur accumulation kept `wr64PrevFrame`
+keyed only on swapchain size. A FS<->window toggle re-lays-out the game
+image (different position/scale) while dimensions can momentarily match, so
+the stored frame blended in as stretched ghost duplicates (user saw doubled
+logo/text). Fix: also track the captured frame's content rect and drop
+history when it changes. Any future accumulation-style present effect must
+invalidate on layout change, not just resize.
+
+**Debugging method note**: nearly every fix in this section came from
+refusing to trust a single screenshot and instead (a) automating a repro
+(PostMessage-driven fullscreen toggle / SetWindowPos drag-resize bracketed
+by WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE + F12) and (b) bisecting by disabling
+one suspect at a time (`WR64_CRT=0`, `WR64_CRT_PERSIST=0`) until the
+minimal reproducing configuration was found. Several early "fixes" (content
+-rect tracking alone, a skip-once flag alone) looked plausible and were
+WRONG — they didn't reproduce-test clean before being reported as fixed.
 
 ## macOS .app bundle (2026-07-22)
 
