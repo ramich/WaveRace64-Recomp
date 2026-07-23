@@ -1422,6 +1422,44 @@ minimal reproducing configuration was found. Several early "fixes" (content
 -rect tracking alone, a skip-once flag alone) looked plausible and were
 WRONG — they didn't reproduce-test clean before being reported as fixed.
 
+Stable tube + N64 logo (2026-07-23): the CRT/bezel tube must NOT change
+shape between scenes — a simulated TV frame doesn't move. It originally
+followed the per-scene VI rectangle, so the 4:3 N64 boot logo (VI rect
+1066x800, native 4:3) drew a 4:3 bezel before the wide attract/gameplay
+(user reported "N64 logo bezel still 4:3"). Diagnosed via a `[VITUBE]`
+per-frame rect-dims log (NOT screenshots — the logo is a sub-second
+transient the F12 shot kept missing, and F12'ing that early crashed the
+toast context, see below): frames 1-5 logged ar=1.332, frame 6+ ar=2.400.
+Fix: `rt64_wr64_set_tube43` — in Expand the tube is clamped to the FULL
+window (the narrower scene pillarboxes INSIDE the fixed glass); in Original
+it is the fixed 4:3 crop box. getViewportAndScissor stashes the pre-crop
+base scissor + the 4:3 box so the tube publish picks the stable one
+regardless of the per-scene crop43 state. Lesson: for a sub-second early
+scene, LOG the values every frame; don't chase it with screenshots.
+
+Crash while debugging (2026-07-23), two findings: (1) the minidump handler
+wrote a 0-byte file — MiniDumpWriteDump's return was never checked, and in
+a multi-threaded process the writer can fail if other threads mutate memory
+mid-walk. Fixed: suspend all other threads (Toolhelp snapshot) before the
+dump + check/log the result. (2) The crash itself was MY automation, not a
+game bug: rapid F12 within the first second hit `recompui::create_context`
+(lazily created on the first screenshot TOAST) before recompui was ready —
+null deref in create_empty_document. With the /Z7+/DEBUG symbols the dump
+now resolves the full stack. Takeaway: don't drive F12 until the game is
+past init.
+
+Sky colour banding — NOT fixable by a present-time dither (2026-07-23):
+tried a final-stage dither (rectangular then TPDF, up to ~1.5 LSB), user
+saw no difference and it was removed. Reason: the banding is baked in at
+the game's native 16-bit (RGBA5551) framebuffer during rendering — a dither
+AFTER that can't recover thrown-away precision, only barely touch the final
+8-bit requantization. The real lever is rendering the internal framebuffer
+above 16-bit: RT64's `internalColorFormat` (High/Automatic), exposed as the
+Graphics tab "High Precision Framebuffer" option — which was present but
+registered `hidden=true` (serialized to graphics.json, never shown). Un-hid
+it and defaulted it to Auto. LESSON: for gradient banding, fix the render
+bit depth, not the output — a post dither is the wrong tool.
+
 ## macOS .app bundle (2026-07-22)
 
 Once the arm64 CI went green (5 port fixes, see the CI Linux/macOS notes),
