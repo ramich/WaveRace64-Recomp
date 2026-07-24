@@ -1583,6 +1583,14 @@ an **overlay-image** bezel composited in the CRT present pass.
   split each corner into two triangles reading as a square; a smooth continuous
   rounded band with no diagonal is what finally satisfied. LESSON: "square in
   the corner" was never one bug; zoom to max on the exact corner each round.
+  (6) The actual last cause (user asked "sure the diagonal was to blame?"): a
+  bright SMOOTH square tab at each inner corner was the REFLECTION, not the PNG —
+  the reflection's per-axis inset used a HARD outMask step (`ox>0?1:0`) so the
+  sample position jumped across the axis boundary at the corner. Removed the
+  inset: sample at the plain nearest-edge rTube (the 1/32 downsample is already
+  smooth at the edge; the true tangential position keeps a pillarbox black -> no
+  menu bleed AND no square tab). Diagnosis that nailed it: the tab was SMOOTH
+  (frame reflection) not checkered (game) -> shader, not asset.
 - OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
