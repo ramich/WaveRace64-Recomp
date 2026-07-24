@@ -1542,11 +1542,12 @@ an **overlay-image** bezel composited in the CRT present pass.
   menu-panel edge, onto black-adjacent frame); suppressed in the corner squares
   (curved-out corners are black). Also removed the wide L/R "recess" cast-shadow
   (it became a huge dark band on ultrawide).
-- **Inner-corner V-notch (2026-07-24):** the mitre seam was strongest at the
-  glass edge, cutting the bright inner lip at each corner. Fix: gate the mitre
-  to the MID bevel (`smoothstep(0.06,0.22,band)*(1-smoothstep(0.45,0.68,band))`)
-  so it never touches the lip — the bright inner edge now wraps the corner
-  cleanly and the mitre sits on the outer bevel only.
+- **Inner-corner artefact — mitre REMOVED (2026-07-24):** first the dark mitre
+  seam cut a V-notch into the bright inner lip at each corner; gating it to the
+  mid bevel fixed that but left a small angular "square"/chevron nick at the
+  outer bevel corner (user-rejected). Final call: drop the mitre entirely — the
+  BOX-distance bevel already gives clean square 90-degree corners on its own, so
+  the frame corner is a smooth nested-square bevel with no diagonal at all.
 - OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
