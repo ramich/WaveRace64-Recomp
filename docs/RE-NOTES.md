@@ -1560,6 +1560,29 @@ an **overlay-image** bezel composited in the CRT present pass.
   (rC = 0.012·min(W,H) ≈ a gentle CRT-tube round) — not oval, not a hard square.
   So the final corner recipe: gently-rounded glass + euclidean-following bevel +
   a faint mid-bevel mitre diagonal + a soft partial reflection roll-off.
+  (4) The LAST "black square in the corner" was a BORDER-SAMPLER BLEED: the game
+  is scale-to-fit sampled with the linear.borderBorder sampler, and at the glass
+  edge/corner `saturate(srcTube)` lands exactly on the content edge → bilinear
+  pulls in the half-texel beyond (border black in fullscreen, pillarbox black in
+  4:3) → a dark square poking through the rounded cutout. Fix: clamp the game UV
+  half a texel inside the content rect (`clamp(srcPixel, fullMin+0.5, fullMax-0.5)`)
+  so it never samples past the content. (A rounded game mask matching the cutout
+  was tried but circular-vs-stretched-elliptical radius mismatch left a residual;
+  the UV clamp is the real root fix.)
+  (5) FINAL corner resolution after ~12 rounds: the "square/two-triangles" was a
+  stack of causes, each fixed then revealing the next. Definitive recipe:
+  (a) shader reflection uses EUCLIDEAN reflFall with NO min(ox,oy) corner
+  suppression (that had square contours -> a dark square patch); the luma gate
+  handles dark corners. (b) game UV clamped half a texel inside (no border-bleed
+  black square). (c) asset: OUTER frame corners ROUNDED concentric with the
+  inner glass corner (rO = rC + bandRef) so the frame is a uniform-width rounded
+  band — a square window corner against a rounded bevel left a square wedge;
+  beyond the rounded band the frame is OPAQUE dark to the window edge (rounded
+  corners show solid dark, not a game leak). (d) inner cast shadow kept very
+  faint. (e) MITRE DIAGONAL REMOVED — the user first wanted it for depth but it
+  split each corner into two triangles reading as a square; a smooth continuous
+  rounded band with no diagonal is what finally satisfied. LESSON: "square in
+  the corner" was never one bug; zoom to max on the exact corner each round.
 - OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
