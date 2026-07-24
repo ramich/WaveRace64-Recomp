@@ -1542,12 +1542,24 @@ an **overlay-image** bezel composited in the CRT present pass.
   menu-panel edge, onto black-adjacent frame); suppressed in the corner squares
   (curved-out corners are black). Also removed the wide L/R "recess" cast-shadow
   (it became a huge dark band on ultrawide).
-- **Inner-corner artefact — mitre REMOVED (2026-07-24):** first the dark mitre
-  seam cut a V-notch into the bright inner lip at each corner; gating it to the
-  mid bevel fixed that but left a small angular "square"/chevron nick at the
-  outer bevel corner (user-rejected). Final call: drop the mitre entirely — the
-  BOX-distance bevel already gives clean square 90-degree corners on its own, so
-  the frame corner is a smooth nested-square bevel with no diagonal at all.
+- **Inner-corner artefacts (2026-07-24, several rounds):** (1) the dark mitre
+  seam cut a V-notch into the bright glass-edge lip → gate the mitre to the MID
+  bevel only (`smoothstep(0.06,0.22,band)*(1-smoothstep(0.55,0.85,band))`) so it
+  never touches the lip. (2) The real "square" the user kept seeing in the
+  corners was NOT the mitre but the SHADER's reflection corner-suppression:
+  `reflFall *= 1 - smoothstep(0, bandPx*0.35, min(ox,oy))` hard-cut the glow in
+  the corner squares, leaving a dark square with a visible straight boundary
+  whenever the edges glowed. Fix: soft PARTIAL roll-off over a wide span
+  (`1 - 0.55*smoothstep(0, bandPx*1.3, min(ox,oy))`) — the black-luma gate
+  already handles genuinely dark/curved-out corners, so no hard cut is needed.
+  The mitre diagonal STAYS (user: it's what sells the depth/realism).
+  (3) The remaining "Viereck" was the HARD-square inner glass corner: the cutout
+  was near-square (rC~3px) AND the bevel used box/Chebyshev distance (square
+  contours) → a hard square nook at each corner. Fix: bevel band back to the
+  EUCLIDEAN rounded-rect SDF (matches the cutout) + a moderate corner radius
+  (rC = 0.012·min(W,H) ≈ a gentle CRT-tube round) — not oval, not a hard square.
+  So the final corner recipe: gently-rounded glass + euclidean-following bevel +
+  a faint mid-bevel mitre diagonal + a soft partial reflection roll-off.
 - OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
