@@ -1511,7 +1511,22 @@ an **overlay-image** bezel composited in the CRT present pass.
   the corners", "reflection not visible", "more diffuse". Change one thing,
   re-capture, confirm. Env `WR64_CRT_BEZEL=1` now force-ENABLES too (was 0-only)
   so autonomous runs can isolate it regardless of saved config.
-- OPEN: the user isn't fully happy with the PNG art itself yet (deferred).
+- **Art refinement round (2026-07-24):** the user iterated the PNG toward a
+  flat picture-frame — uniform brightness all around (directional bevel light
+  REMOVED, it read as "brighter top-left"), inner bevel a touch brighter than
+  the outer flat, mitred-corner seam confined to the inner bevel only, and the
+  inner bevel's outer corners made TRUE 90° by driving the bevel profile off a
+  BOX (Chebyshev max) distance instead of the euclidean SDF (euclidean rounds
+  corners). Asymmetric inset (INSET_X 0.026 < INSET_Y 0.035) + a wider L/R
+  inner cast-shadow makes the picture read as recessed/deeper on the sides.
+- **Reflection sampled the extreme edge = wrong (2026-07-24 fix):** with the CRT
+  curve or a pillarboxed menu the very edge of the presented rect is often black
+  (curved-out corner / bar), so the frame reflected BLACK. Fix (user's idea):
+  sample the reflection from the OUTER ~10 % band of the game image, not the
+  edge — inset the sample point ~6 % inward (`rTubeInset = 0.06 + 0.88*rTube`);
+  the wide EdgeGlow blur then averages that real edge band. Blur widened over
+  several rounds (rings out to ~1000 px) for a very diffuse wash.
+- OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
 
