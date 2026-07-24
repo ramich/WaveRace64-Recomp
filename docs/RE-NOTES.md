@@ -1526,6 +1526,27 @@ an **overlay-image** bezel composited in the CRT present pass.
   edge — inset the sample point ~6 % inward (`rTubeInset = 0.06 + 0.88*rTube`);
   the wide EdgeGlow blur then averages that real edge band. Blur widened over
   several rounds (rings out to ~1000 px) for a very diffuse wash.
+- **Reflection = real downsample, not a per-pixel blur (2026-07-24).** A per-
+  pixel grid blur (any tap count) can't kill the "mirror" of large features
+  (hills, HUD) or the ultrawide world-expansion edge artefacts — it either
+  ghosts (sparse+wide) or stays detailed (dense+narrow). Fix: reuse RT64's
+  existing `boxFilter` COMPUTE pipeline (the one behind `RenderTarget::
+  downsampleTarget`) to box-average the frame scratch to **1/32** into a small
+  `wr64ReflSmall` texture each present, bind it as `gRefl` (new slot on
+  `WR64CrtDescriptorSet` — textures grouped before the sampler), and sample it
+  3x3-smoothed for the reflection. Inherently structureless. plume has NO
+  auto-mipgen, so a downsample pass IS the tool. Gate the reflection by the
+  SAME smooth source's luma (not a sharp per-pixel sample) or the band gets
+  per-pixel notches. Reflection is purely ADDITIVE and inset only on the
+  PERPENDICULAR axis (insetting the tangential pulled sideways content, e.g. a
+  menu-panel edge, onto black-adjacent frame); suppressed in the corner squares
+  (curved-out corners are black). Also removed the wide L/R "recess" cast-shadow
+  (it became a huge dark band on ultrawide).
+- **Inner-corner V-notch (2026-07-24):** the mitre seam was strongest at the
+  glass edge, cutting the bright inner lip at each corner. Fix: gate the mitre
+  to the MID bevel (`smoothstep(0.06,0.22,band)*(1-smoothstep(0.45,0.68,band))`)
+  so it never touches the lip — the bright inner edge now wraps the corner
+  cleanly and the mitre sits on the outer bevel only.
 - OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
