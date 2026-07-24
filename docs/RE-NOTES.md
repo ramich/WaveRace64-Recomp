@@ -1598,6 +1598,12 @@ an **overlay-image** bezel composited in the CRT present pass.
   reflection bug, not a real geometry need). Glass opening stays gently rounded
   (rC ~1.2% of height); only the far/outer edge of the frame band is square,
   matching a real CRT cabinet (rounded tube opening, square outer housing).
+  (8) Follow-up: the bevel/crest CONTOUR (the visible lighter "inner frame")
+  still traced the euclidean rounded-rect distance, so it read as a rounded
+  blob in the corners even with a square outer edge. Switched the bevel band
+  to a BOX (Chebyshev) distance while the tiny glass hole itself (alpha/dist)
+  stays on the euclidean SDF — the bevel ring is now a clean square, only the
+  cutout opening keeps its small gentle round.
 - OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
