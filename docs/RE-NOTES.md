@@ -1591,6 +1591,13 @@ an **overlay-image** bezel composited in the CRT present pass.
   smooth at the edge; the true tangential position keeps a pillarbox black -> no
   menu bleed AND no square tab). Diagnosis that nailed it: the tab was SMOOTH
   (frame reflection) not checkered (game) -> shader, not asset.
+  (7) With the real bug (6) fixed, the user asked to RESTORE two things that
+  had been removed chasing red herrings: the mitre diagonal (mid-bevel gated,
+  as before) and 90-DEGREE OUTER frame edges (outerMask back to a plain square
+  fill — the earlier corner-rounding of the outer edge was compensating for the
+  reflection bug, not a real geometry need). Glass opening stays gently rounded
+  (rC ~1.2% of height); only the far/outer edge of the frame band is square,
+  matching a real CRT cabinet (rounded tube opening, square outer housing).
 - OPEN: the user still wants the PNG art refined further (deferred).
 
 ## macOS .app bundle (2026-07-22)
